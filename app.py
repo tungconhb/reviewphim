@@ -1195,34 +1195,38 @@ def healthz():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 if __name__ == '__main__':
+    import threading, os
 
-    # Init DB and start background AI loader (non-blocking)
     try:
+        print("✅ Initializing database (once)...")
         init_db()
     except Exception as e:
-        print("⚠️ init_db() raised:", e)
-    __thread = __threading_for_ai.Thread(target=background_load_ai, kwargs={'retry': True, 'retry_delay': 300}, daemon=True)
-    __thread.start()
-    init_db()
-    
-    # Initialize AI model with error handling
-    print("🤖 Initializing AI Classification System...")
-    ai_loaded = load_ai_model()
-    if ai_loaded:
-        print("🎯 AI-powered genre classification ready!")
-    else:
-        print("📝 Using manual classification fallback")
-    
-    # Initialize auto-update system
-    print("🚀 Initializing Auto-Update System...")
+        print("⚠️ init_db() failed:", e)
+
+    # Khởi động AI background (non-blocking)
+    def start_background_ai():
+        try:
+            print("🤖 Initializing AI model in background...")
+            ai_loaded = load_ai_model()
+            if ai_loaded:
+                print("🎯 AI model ready!")
+            else:
+                print("📝 Fallback: manual classification")
+        except Exception as e:
+            print("⚠️ AI init error:", e)
+
+    threading.Thread(target=start_background_ai, daemon=True).start()
+
+    # Auto-update (safe)
     try:
+        print("🚀 Initializing Auto-Update System...")
         auto_update = get_auto_update(app)
         print("✅ Auto-Update System ready!")
     except Exception as e:
-        print(f"⚠️ Auto-Update System failed to initialize: {e}")
+        print(f"⚠️ Auto-Update System failed: {e}")
         print("📝 Continuing without auto-update...")
 
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    print(f"🌐 Starting server on port {port}...")
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    # === Flask server start ===
+    port = int(os.environ.get("PORT", 10000))  # Render dùng PORT động
+    print(f"🌐 Starting Flask on 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
