@@ -351,10 +351,28 @@ def review_detail(review_id):
         flash('Không tìm thấy review!', 'error')
         return redirect(url_for('index'))
     
-    # Tạo embed URL
-    video_info = extract_video_info(review[4])  # video_url
-    embed_url = video_info['embed_url'] if video_info else None
-    
+    # Tạo embed URL (Render-safe)
+    video_url = review[4]
+    embed_url = None
+
+    if "youtube.com" in video_url or "youtu.be" in video_url:
+        if "watch?v=" in video_url:
+            video_id = video_url.split("watch?v=")[-1].split("&")[0]
+        elif "youtu.be/" in video_url:
+            video_id = video_url.split("youtu.be/")[-1].split("?")[0]
+        else:
+            video_id = None
+        if video_id:
+            embed_url = f"https://www.youtube.com/embed/{video_id}"
+
+    elif "facebook.com" in video_url:
+        embed_url = f"https://www.facebook.com/plugins/video.php?href={video_url}"
+
+    else:
+        # Có thể là link mp4 trực tiếp
+        if video_url.lower().endswith(('.mp4', '.webm', '.ogg')):
+            embed_url = video_url  # local or external direct link
+
     return render_template('review_detail.html', review=review, embed_url=embed_url)
 
 @app.route('/search')
