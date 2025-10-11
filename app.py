@@ -1227,6 +1227,12 @@ def healthz():
         return jsonify({'status': 'ok', 'ai_loaded': bool(model is not None)})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
+    
+@app.route('/health')
+def health_check():
+    """Endpoint nhẹ cho UptimeRobot hoặc ping tự động"""
+    return "OK", 200
+
 if __name__ == '__main__':
     import threading, os
 
