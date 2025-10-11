@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
-import sqlite3, re, os, threading
+import sqlite3, os, threading, re
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from sentence_transformers import SentenceTransformer, util
@@ -54,17 +54,13 @@ app.secret_key = 'reviewchill_secret_key_2025'
 # ==================================================
 def is_admin_request():
     """Kiểm tra xem request có quyền admin không"""
-    # Nếu chạy localhost -> luôn cho phép
     if request.remote_addr in ['127.0.0.1', '::1']:
         return True
-    
-    # Nếu ở production (Render, v.v.) thì yêu cầu key
     if IS_PRODUCTION:
         key = request.args.get("key") or request.headers.get("X-Admin-Key")
         if key and key == ADMIN_KEY:
             return True
         return False
-    
     return True
 
 def require_admin_access():
@@ -99,9 +95,44 @@ def init_db():
                 )''')
     conn.commit()
     conn.close()
+
+def init_stats_db():
+    """Tạo bảng thống kê truy cập nếu chưa có"""
+    conn = sqlite3.connect('db.sqlite')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS access_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    ip TEXT,
+                    path TEXT,
+                    user_agent TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )''')
+    conn.commit()
+    conn.close()
 # ==================================================
 
-# =================== ROUTES =======================
+# =================== MIDDLEWARE ===================
+@app.before_request
+def log_access():
+    """Ghi lại lượt truy cập"""
+    try:
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        path = request.path
+        ua = request.headers.get('User-Agent', 'Unknown')
+        if path.startswith('/static') or path.startswith('/health'):
+            return
+        conn = sqlite3.connect('db.sqlite')
+        c = conn.cursor()
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        c.execute('INSERT INTO access_logs (date, ip, path, user_agent) VALUES (?, ?, ?, ?)',
+                  (today, ip, path, ua))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("⚠️ Lỗi ghi log truy cập:", e)
+# ==================================================
+
 @app.route("/health")
 def health_check():
     return jsonify(status="ok", model_loaded=model is not None), 200
@@ -128,56 +159,25 @@ def admin_dashboard():
     conn.close()
     return render_template('admin/dashboard.html', reviews=reviews)
 
-@app.route('/admin/new')
-def admin_new_review():
-    deny = require_admin_access()
-    if deny: return deny
-    return render_template('admin/new_review.html')
-
-@app.route('/admin/add', methods=['POST'])
-def admin_add_review():
+# ============ THỐNG KÊ TRUY CẬP ============
+@app.route('/admin/stats')
+def admin_stats():
     deny = require_admin_access()
     if deny: return deny
     
-    title = request.form['title']
-    movie_title = request.form['movie_title']
-    reviewer_name = request.form['reviewer_name']
-    video_url = request.form['video_url']
-    description = request.form['description']
-    rating = int(request.form['rating'])
-    movie_link = request.form.get('movie_link', '')
-
-    parser = YouTubeURLParser()
-    video_info = parser.get_video_info(video_url)
-    if not video_info:
-        flash('URL video không hợp lệ!', 'error')
-        return redirect(url_for('admin_new_review'))
-
     conn = sqlite3.connect('db.sqlite')
     c = conn.cursor()
-    c.execute('''INSERT INTO video_reviews 
-                (title, movie_title, reviewer_name, video_url, video_type, video_id, description, rating, movie_link)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (title, movie_title, reviewer_name, video_url,
-                 video_info['type'], video_info['id'], description, rating, movie_link))
-    conn.commit()
+    c.execute('''SELECT date, COUNT(*) as visits FROM access_logs 
+                 GROUP BY date ORDER BY date DESC LIMIT 30''')
+    daily_stats = c.fetchall()
+    c.execute('SELECT COUNT(*), COUNT(DISTINCT ip) FROM access_logs')
+    total_visits, unique_visitors = c.fetchone()
     conn.close()
-    flash('✅ Thêm review thành công!', 'success')
-    return redirect(url_for('admin_dashboard', key=ADMIN_KEY))
-
-# ============ AUTO UPDATE (chạy nền) ============
-@app.route('/admin/auto-update')
-def admin_auto_update():
-    deny = require_admin_access()
-    if deny: return deny
-
-    logs = []
-    try:
-        auto_update = get_auto_update(app)
-        logs = auto_update.get_recent_logs(limit=10)
-    except Exception as e:
-        print(f"Error getting logs: {e}")
-    return render_template('admin/auto_update.html', logs=logs)
+    return render_template('admin/stats.html',
+                           daily_stats=daily_stats,
+                           total_visits=total_visits,
+                           unique_visitors=unique_visitors)
+# ==================================================
 
 # ============ API ======================
 @app.route('/api/reviews')
@@ -192,7 +192,6 @@ def api_reviews():
     ])
 # =======================================
 
-# ============ AUTO-UPDATE BACKGROUND ============
 @app.before_first_request
 def start_auto_update():
     try:
@@ -201,10 +200,10 @@ def start_auto_update():
         print("✅ Auto-Update System ready and running in background!")
     except Exception as e:
         print(f"⚠️ Lỗi khởi động Auto-Update: {e}")
-# ================================================
 
 if __name__ == '__main__':
     init_db()
+    init_stats_db()
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(debug=debug, host='0.0.0.0', port=port)
