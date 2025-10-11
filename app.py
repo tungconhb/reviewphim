@@ -5,18 +5,36 @@ from datetime import datetime
 import os
 
 # ==== AI PHÂN LOẠI PHIM THÔNG MINH ====
-from sentence_transformers import SentenceTransformer, util
-
-print("🔹Đang tải mô hình AI phân loại phim...")
-model = SentenceTransformer("all-MiniLM-L6-v2")
+# Initialize AI model with error handling
+model = None
 GENRES = [
     "Hành động", "Kinh dị", "Tình cảm", "Hài hước",
     "Hoạt hình", "Viễn tưởng", "Tâm lý", "Tài liệu", "Khác"
 ]
 
+def load_ai_model():
+    """Load AI model with error handling"""
+    global model
+    try:
+        print("🔹Đang tải mô hình AI phân loại phim...")
+        from sentence_transformers import SentenceTransformer, util
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        print("✅ Mô hình AI đã sẵn sàng!")
+        return True
+    except Exception as e:
+        print(f"⚠️ Không thể tải mô hình AI: {e}")
+        print("📝 Sử dụng phân loại thủ công...")
+        model = None
+        return False
+
 def analyze_movie_info(title, description, tags):
     """Phân loại phim thông minh bằng mô hình ngôn ngữ"""
     try:
+        if model is None:
+            # Fallback to manual classification if AI model fails
+            return manual_classify_movie(title, description, tags)
+        
+        from sentence_transformers import util
         text = f"{title} {description or ''} {' '.join(tags or [])}"
         emb_text = model.encode(text, convert_to_tensor=True)
         emb_genres = model.encode(GENRES, convert_to_tensor=True)
@@ -25,6 +43,30 @@ def analyze_movie_info(title, description, tags):
         return best_genre
     except Exception as e:
         print("⚠️ Lỗi AI phân loại:", e)
+        return manual_classify_movie(title, description, tags)
+
+def manual_classify_movie(title, description, tags):
+    """Manual classification fallback"""
+    text = f"{title} {description or ''} {' '.join(tags or [])}".lower()
+    
+    # Simple keyword-based classification
+    if any(word in text for word in ['hành động', 'action', 'chiến đấu', 'fight']):
+        return "Hành động"
+    elif any(word in text for word in ['kinh dị', 'horror', 'ma', 'ghost']):
+        return "Kinh dị"
+    elif any(word in text for word in ['tình cảm', 'romance', 'love', 'yêu']):
+        return "Tình cảm"
+    elif any(word in text for word in ['hài', 'comedy', 'funny', 'vui']):
+        return "Hài hước"
+    elif any(word in text for word in ['hoạt hình', 'animation', 'cartoon']):
+        return "Hoạt hình"
+    elif any(word in text for word in ['viễn tưởng', 'sci-fi', 'science fiction']):
+        return "Viễn tưởng"
+    elif any(word in text for word in ['tâm lý', 'psychological', 'drama']):
+        return "Tâm lý"
+    elif any(word in text for word in ['tài liệu', 'documentary']):
+        return "Tài liệu"
+    else:
         return "Khác"
 # =========================================
 
@@ -39,7 +81,7 @@ app = Flask(__name__)
 app.secret_key = 'reviewchill_secret_key_2025'
 
 # Hàm phân tích tự động phim
-def analyze_movie_info(title, movie_title):
+def analyze_country_info(title, movie_title):
     """Phân tích thông tin phim từ tiêu đề để tự động phân loại"""
     title_lower = title.lower()
     movie_title_lower = movie_title.lower()
@@ -165,7 +207,7 @@ def init_db():
     
     for video in existing_videos:
         video_id, title, movie_title = video
-        analysis = analyze_movie_info(title, movie_title)
+        analysis = analyze_country_info(title, movie_title)
         c.execute('''UPDATE video_reviews 
                     SET country=?, genre=?, movie_type=?, series_name=?, episode_number=?
                     WHERE id=?''',
@@ -467,7 +509,7 @@ def admin_add_review():
         return redirect(url_for('admin_new_review'))
     
     # Tự động phân tích thông tin phim
-    analysis = analyze_movie_info(title, movie_title)
+    analysis = analyze_country_info(title, movie_title)
     
     conn = sqlite3.connect('db.sqlite')
     c = conn.cursor()
@@ -1087,11 +1129,24 @@ def get_related_videos(current_video_id):
 if __name__ == '__main__':
     init_db()
     
+    # Initialize AI model with error handling
+    print("🤖 Initializing AI Classification System...")
+    ai_loaded = load_ai_model()
+    if ai_loaded:
+        print("🎯 AI-powered genre classification ready!")
+    else:
+        print("📝 Using manual classification fallback")
+    
     # Initialize auto-update system
     print("🚀 Initializing Auto-Update System...")
-    auto_update = get_auto_update(app)
-    print("✅ Auto-Update System ready!")
+    try:
+        auto_update = get_auto_update(app)
+        print("✅ Auto-Update System ready!")
+    except Exception as e:
+        print(f"⚠️ Auto-Update System failed to initialize: {e}")
+        print("📝 Continuing without auto-update...")
 
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    print(f"🌐 Starting server on port {port}...")
     app.run(debug=debug, host='0.0.0.0', port=port)
