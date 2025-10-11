@@ -1090,5 +1090,6 @@ if __name__ == '__main__':
     print("🚀 Initializing Auto-Update System...")
     auto_update = get_auto_update(app)
     print("✅ Auto-Update System ready!")
-    
+
+    port = int(os.environ.get('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=5000)
