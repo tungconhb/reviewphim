@@ -3,7 +3,12 @@ import sqlite3
 import re
 from datetime import datetime
 import os
-
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "Ttung@051193")
+DISABLE_AI = os.getenv("DISABLE_AI", "false").lower() == "true"
+MODEL_NAME = os.getenv("AI_MODEL", "paraphrase-MiniLM-L3-v2")
+ACCESS_LOG_DB = os.getenv("ACCESS_LOG_DB", "access_logs.sqlite")
+PORT = int(os.environ.get("PORT", 5000))
+FLASK_DEBUG = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
 # ==== AI PHÂN LOẠI PHIM THÔNG MINH ====
 # Initialize AI model with error handling
 model = None
@@ -18,7 +23,19 @@ def load_ai_model():
     try:
         print("🔹Đang tải mô hình AI phân loại phim...")
         from sentence_transformers import SentenceTransformer, util
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        def background_load_ai():
+            global model
+            try:
+                from sentence_transformers import SentenceTransformer
+                print(f"⏳ Loading AI model: {MODEL_NAME} ...")
+                model = SentenceTransformer(MODEL_NAME)
+                print("✅ AI model loaded.")
+            except Exception as e:
+                print("⚠️ Failed to load AI model:", e)
+                model = None
+
+        # Gọi khi khởi động
+        threading.Thread(target=background_load_ai, daemon=True).start()
         print("✅ Mô hình AI đã sẵn sàng!")
         return True
     except Exception as e:
@@ -79,6 +96,25 @@ from services.youtube_url_parser import YouTubeURLParser
 
 app = Flask(__name__)
 app.secret_key = 'reviewchill_secret_key_2025'
+
+@app.before_request
+def log_user_access():
+    if request.path.startswith('/static') or request.path.startswith('/favicon'):
+        return
+    try:
+        conn = sqlite3.connect(ACCESS_LOG_DB, check_same_thread=False)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS access_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT, path TEXT, method TEXT, agent TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        path = request.path
+        agent = request.headers.get('User-Agent', '')[:300]
+        conn.execute("INSERT INTO access_logs (ip, path, method, agent) VALUES (?, ?, ?, ?)",
+                     (ip, path, request.method, agent))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("⚠️ Access log error:", e)
 
 # Hàm phân tích tự động phim
 def analyze_country_info(title, movie_title):
@@ -156,7 +192,11 @@ def analyze_country_info(title, movie_title):
 
 # Khởi tạo database
 def init_db():
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except Exception:
+        pass
     c = conn.cursor()
     
     # Tạo bảng video reviews với URL video và thông tin phân loại
@@ -310,8 +350,9 @@ def extract_video_info(url):
 
 @app.route('/')
 def index():
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
     c = conn.cursor()
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('''SELECT * FROM video_reviews ORDER BY created_at DESC''')
     reviews = c.fetchall()
     conn.close()
@@ -320,8 +361,8 @@ def index():
 
 @app.route('/review/<int:review_id>')
 def review_detail(review_id):
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('SELECT * FROM video_reviews WHERE id = ?', (review_id,))
     review = c.fetchone()
     conn.close()
@@ -345,8 +386,8 @@ def search():
     if not query and not country and not genre:
         return redirect(url_for('index'))
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     
     # Xây dựng câu truy vấn động
     where_conditions = []
@@ -391,8 +432,8 @@ def filter_movies():
     genre = request.args.get('genre', 'all')
     movie_type = request.args.get('type', 'all')
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     
     # Xây dựng câu truy vấn
     where_conditions = ['1=1']
@@ -433,8 +474,8 @@ def filter_movies():
 @app.route('/series/<series_name>')
 def series_detail(series_name):
     """Hiển thị tất cả tập của một bộ phim"""
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('''SELECT * FROM video_reviews 
                 WHERE series_name = ? 
                 ORDER BY episode_number ASC, created_at ASC''', (series_name,))
@@ -473,8 +514,8 @@ def admin_dashboard():
         flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
         return redirect(url_for('index'))
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('SELECT * FROM video_reviews ORDER BY created_at DESC')
     reviews = c.fetchall()
     conn.close()
@@ -511,8 +552,8 @@ def admin_add_review():
     # Tự động phân tích thông tin phim
     analysis = analyze_country_info(title, movie_title)
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('''INSERT INTO video_reviews 
                 (title, movie_title, reviewer_name, video_url, video_type, video_id, description, rating, movie_link, country, genre, series_name, episode_number, movie_type)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -532,8 +573,8 @@ def admin_edit_review(review_id):
         flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
         return redirect(url_for('index'))
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('SELECT * FROM video_reviews WHERE id = ?', (review_id,))
     review = c.fetchone()
     conn.close()
@@ -564,8 +605,8 @@ def admin_update_review(review_id):
         flash('URL video không hợp lệ! Hỗ trợ YouTube và Facebook.', 'error')
         return redirect(url_for('admin_edit_review', review_id=review_id))
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('''UPDATE video_reviews 
                 SET title=?, movie_title=?, reviewer_name=?, video_url=?, video_type=?, video_id=?, 
                     description=?, rating=?, movie_link=?
@@ -584,8 +625,8 @@ def admin_delete_review(review_id):
         flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
         return redirect(url_for('index'))
     
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('DELETE FROM video_reviews WHERE id = ?', (review_id,))
     conn.commit()
     conn.close()
@@ -619,8 +660,8 @@ def admin_auto_update_stats():
         auto_update = get_auto_update(app)
         
         # Get total videos count
-        conn = sqlite3.connect('db.sqlite')
-        c = conn.cursor()
+        conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
         c.execute('SELECT COUNT(*) FROM video_reviews')
         total_videos = c.fetchone()[0]
         conn.close()
@@ -696,8 +737,8 @@ def admin_auto_update_videos():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        conn = sqlite3.connect('db.sqlite')
-        c = conn.cursor()
+        conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
         c.execute('''SELECT id, title, movie_title, reviewer_name, created_at 
                     FROM video_reviews ORDER BY created_at DESC''')
         videos = c.fetchall()
@@ -759,8 +800,8 @@ def admin_auto_update_logs():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        conn = sqlite3.connect('db.sqlite')
-        c = conn.cursor()
+        conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
         c.execute('''SELECT timestamp, status, message, videos_found, videos_added 
                     FROM update_logs ORDER BY timestamp DESC LIMIT 20''')
         logs = c.fetchall()
@@ -787,8 +828,8 @@ def admin_auto_update_bulk_operations():
         data = request.get_json()
         operation = data.get('operation')
         
-        conn = sqlite3.connect('db.sqlite')
-        c = conn.cursor()
+        conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
         
         if operation == 'delete_selected':
             video_ids = data.get('video_ids', [])
@@ -876,8 +917,8 @@ def admin_auto_update_bulk_operations():
 # API endpoints
 @app.route('/api/reviews')
 def api_reviews():
-    conn = sqlite3.connect('db.sqlite')
-    c = conn.cursor()
+    conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
     c.execute('SELECT * FROM video_reviews ORDER BY created_at DESC')
     reviews = c.fetchall()
     conn.close()
@@ -1001,8 +1042,8 @@ def check_api_status():
 def get_related_videos(current_video_id):
     """API để lấy video đề xuất liên quan với ưu tiên phim cùng bộ"""
     try:
-        conn = sqlite3.connect('db.sqlite')
-        c = conn.cursor()
+        conn = sqlite3.connect("db.sqlite", check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL;")
         
         # Lấy thông tin video hiện tại
         c.execute('''SELECT movie_title, reviewer_name, series_name, movie_type, country, genre 
@@ -1125,6 +1166,10 @@ def get_related_videos(current_video_id):
         
     except Exception as e:
         return jsonify({'success': False, 'error': f'Lỗi server: {str(e)}'})
+        
+@app.route('/healthz')
+def healthz():
+    return jsonify({"status": "ok", "ai_loaded": model is not None})
 
 if __name__ == '__main__':
     init_db()
