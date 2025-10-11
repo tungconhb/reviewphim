@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 import sqlite3
 import re
 from datetime import datetime
+import os
 
 # ==== AI PHÂN LOẠI PHIM THÔNG MINH ====
 from sentence_transformers import SentenceTransformer, util
@@ -1092,4 +1093,5 @@ if __name__ == '__main__':
     print("✅ Auto-Update System ready!")
 
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(debug=debug, host='0.0.0.0', port=port)
