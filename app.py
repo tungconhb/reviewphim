@@ -1,16 +1,18 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
+import re
+from datetime import datetime
+import os
 
-# ======= RENDER / DEPLOY CONFIG (added by assistant) =======
-import os as __os_for_config
-ADMIN_SECRET = __os_for_config.getenv("ADMIN_SECRET", "Ttung@051193")
-DISABLE_AI = __os_for_config.getenv("DISABLE_AI", "false").lower() == "true"
-MODEL_NAME = __os_for_config.getenv("AI_MODEL", "paraphrase-MiniLM-L3-v2")
-ACCESS_LOG_DB = __os_for_config.getenv("ACCESS_LOG_DB", "access_logs.sqlite")
-PORT = int(__os_for_config.getenv("PORT", 5000))
-FLASK_DEBUG = __os_for_config.getenv("FLASK_DEBUG", "False").lower() == "true"
+# ======= RENDER / DEPLOY CONFIG (Đã chỉnh gọn & an toàn) =======
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "Ttung@051193")
+DISABLE_AI = os.getenv("DISABLE_AI", "false").lower() == "true"
+MODEL_NAME = os.getenv("AI_MODEL", "paraphrase-MiniLM-L3-v2")
+ACCESS_LOG_DB = os.getenv("ACCESS_LOG_DB", "access_logs.sqlite")
+PORT = int(os.getenv("PORT", 10000))  # ✅ Render sẽ set biến PORT khi deploy
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
-# Helper: centralized DB connector for WAL + multithread safety
+# ======= DB CONNECTOR (ổn định đa luồng và WAL) =======
 def get_conn(path='db.sqlite'):
     conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     try:
@@ -19,11 +21,41 @@ def get_conn(path='db.sqlite'):
         pass
     return conn
 
-# Health and AI model var
-model = None
-import re
-from datetime import datetime
-import os
+# ======= HÀM CHẶN ADMIN KHI TRUY CẬP TỪ DOMAIN =======
+from flask import request
+
+def is_localhost():
+    """Kiểm tra xem có phải truy cập nội bộ hay không."""
+    host = request.host or ""
+    # Local test (Windows, localhost, 127.0.0.1)
+    if "127.0.0.1" in host or "localhost" in host:
+        return True
+    # Render hoặc domain public
+    if "onrender.com" in host or "render.com" in host:
+        return False
+    # Render tự đặt biến môi trường này
+    if "RENDER" in os.environ:
+        return False
+    return True
+
+
+# ======= HOOK CHẶN ADMIN TOÀN HỆ THỐNG =======
+@app.before_request
+def block_admin_on_render():
+    """Chặn toàn bộ truy cập /admin nếu không phải localhost"""
+    if not is_localhost() and request.path.startswith('/admin'):
+        flash("Chức năng quản trị bị vô hiệu hóa trên môi trường online!", "error")
+        return redirect(url_for('index'))
+
+
+# ======= THÔNG TIN HỆ THỐNG =======
+print("✅ Flask configuration loaded:")
+print(f"   ADMIN_SECRET: {'***' if ADMIN_SECRET else '(none)'}")
+print(f"   AI_MODEL: {MODEL_NAME}")
+print(f"   DEBUG: {FLASK_DEBUG}")
+print(f"   PORT: {PORT}")
+print(f"   DISABLE_AI: {DISABLE_AI}")
+
 
 # ==== AI PHÂN LOẠI PHIM THÔNG MINH ====
 # Initialize AI model with error handling
@@ -48,9 +80,10 @@ def load_ai_model():
         model = None
         return False
 
-def analyze_movie_info(title, description, tags):
+def analyze_movie_info(title, description, tags=None):
     """Phân loại phim thông minh bằng mô hình ngôn ngữ"""
     try:
+        tags = tags or []  # 🔹 đảm bảo luôn có giá trị
         if model is None:
             # Fallback to manual classification if AI model fails
             return manual_classify_movie(title, description, tags)
@@ -1215,7 +1248,10 @@ if __name__ == '__main__':
         except Exception as e:
             print("⚠️ AI init error:", e)
 
-    threading.Thread(target=start_background_ai, daemon=True).start()
+    if not os.getenv("DISABLE_AI", "false").lower() == "true":
+        threading.Thread(target=start_background_ai, daemon=True).start()
+    else:
+        print("🧠 AI loading skipped (DISABLE_AI=True)")
 
     # Auto-update (safe)
     try:
@@ -1229,4 +1265,5 @@ if __name__ == '__main__':
     # === Flask server start ===
     port = int(os.environ.get("PORT", 10000))  # Render dùng PORT động
     print(f"🌐 Starting Flask on 0.0.0.0:{port}")
+    print("✅ Flask app initialization complete. Server starting...")
     app.run(host="0.0.0.0", port=port, debug=False)
