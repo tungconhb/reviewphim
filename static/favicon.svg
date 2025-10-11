@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a1a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f0f0f;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E50914;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#B20710;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="32" height="32" fill="url(#bgGrad)" rx="4"/>
+  
+  <!-- Clapperboard top (kiểu Netflix) -->
+  <rect x="3" y="6" width="26" height="6" fill="url(#redGrad)" stroke="#B20710" stroke-width="0.5"/>
+  
+  <!-- Diagonal stripes -->
+  <rect x="3" y="6" width="2" height="6" fill="white"/>
+  <rect x="7" y="6" width="2" height="6" fill="white"/>
+  <rect x="11" y="6" width="2" height="6" fill="white"/>
+  <rect x="15" y="6" width="2" height="6" fill="white"/>
+  <rect x="19" y="6" width="2" height="6" fill="white"/>
+  <rect x="23" y="6" width="2" height="6" fill="white"/>
+  <rect x="27" y="6" width="2" height="6" fill="white"/>
+  
+  <!-- Main board -->
+  <rect x="3" y="12" width="26" height="14" fill="#221F1F" stroke="#B20710" stroke-width="0.5"/>
+  
+  <!-- Hinges -->
+  <rect x="2" y="10" width="2" height="4" fill="#C0C0C0" rx="1"/>
+  <rect x="28" y="10" width="2" height="4" fill="#C0C0C0" rx="1"/>
+  
+  <!-- Play button -->
+  <polygon points="13,16 13,22 19,19" fill="url(#redGrad)"/>
+  
+  <!-- Rating star -->
+  <g transform="translate(21, 16)">
+    <polygon points="0,-2 0.6,-0.6 2,0 0.6,0.6 0,2 -0.6,0.6 -2,0 -0.6,-0.6" 
+             fill="url(#goldGrad)" stroke="#CC8500" stroke-width="0.2"/>
+  </g>
+  
+  <!-- Subtle reflection -->
+  <rect x="3" y="6" width="26" height="1" fill="rgba(255,255,255,0.3)"/>
+</svg>

@@ -1,0 +1,859 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý tự động cập nhật{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="text-white mb-1">
+                    <i class="fas fa-robot text-warning me-2"></i>
+                    Hệ thống tự động cập nhật
+                </h2>
+                <p class="text-muted mb-0">Tự động cập nhật video review từ YouTube</p>
+            </div>
+            <div>
+                <button id="toggleAutoUpdate" class="btn btn-outline-warning me-2">
+                    <i class="fas fa-power-off me-1"></i>
+                    <span id="toggleText">...</span>
+                </button>
+                <button id="runManualUpdate" class="btn btn-warning">
+                    <i class="fas fa-play me-1"></i>
+                    Chạy thủ công
+                </button>
+                <button id="manageBulkOperations" class="btn btn-info ms-2">
+                    <i class="fas fa-tasks me-1"></i>
+                    Quản lý hàng loạt
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="row mb-4">
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-warning">
+                <div class="card-body d-flex align-items-center">
+                    <i class="fas fa-power-off fa-2x text-warning me-3"></i>
+                    <div>
+                        <h6 class="text-muted mb-1">Trạng thái</h6>
+                        <h4 class="text-white mb-0" id="systemStatus">Đang tải...</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-info">
+                <div class="card-body d-flex align-items-center">
+                    <i class="fas fa-video fa-2x text-info me-3"></i>
+                    <div>
+                        <h6 class="text-muted mb-1">Tổng đã thêm</h6>
+                        <h4 class="text-white mb-0" id="totalVideos">-</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-success">
+                <div class="card-body d-flex align-items-center">
+                    <i class="fas fa-clock fa-2x text-success me-3"></i>
+                    <div>
+                        <h6 class="text-muted mb-1">Lần cập nhật cuối</h6>
+                        <h6 class="text-white mb-0" id="lastUpdate">-</h6>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-primary">
+                <div class="card-body d-flex align-items-center">
+                    <i class="fas fa-calendar fa-2x text-primary me-3"></i>
+                    <div>
+                        <h6 class="text-muted mb-1">Lần chạy tiếp theo</h6>
+                        <h6 class="text-white mb-0" id="nextRun">-</h6>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration & Manual Add & Logs -->
+    <div class="row">
+        <!-- Configuration -->
+        <div class="col-lg-3 mb-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-secondary text-white">
+                    <i class="fas fa-cog me-2"></i> Cấu hình
+                </div>
+                <div class="card-body">
+                    <p class="text-light mb-2">YouTube API: <span id="apiStatus" class="badge bg-warning">Kiểm tra...</span></p>
+                    <p class="text-light mb-2">Tần suất cập nhật: <span class="text-warning fw-bold">Mỗi 24 giờ</span></p>
+                    <p class="text-light mb-2">Tự động đăng: <span class="text-success fw-bold">Đã bật</span></p>
+                    <p class="text-light mb-2">Từ khóa tìm kiếm:</p>
+                    <ul class="text-info mb-0" style="font-size: 0.85em;">
+                        <li>Chú Cuội Review Phim</li>
+                        <li>Review phim Nguyễn Review 2</li>
+                        <li>Review phim Cuồng Phim Hay</li>
+                        <li>Review phim Chén Phim Review</li>
+                        <li>Review phim Động Phim Review</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual Add Video -->
+        <div class="col-lg-4 mb-4">
+            <div class="card bg-dark border-success">
+                <div class="card-header bg-success text-white">
+                    <i class="fas fa-plus-circle me-2"></i> Thêm video thủ công
+                </div>
+                <div class="card-body">
+                    <form id="manualAddForm">
+                        <div class="mb-3">
+                            <label for="youtubeUrl" class="form-label text-light">
+                                <i class="fab fa-youtube text-danger me-1"></i> YouTube URL
+                            </label>
+                            <input type="url" class="form-control bg-secondary text-white border-secondary" 
+                                   id="youtubeUrl" 
+                                   placeholder="https://www.youtube.com/watch?v=..." 
+                                   required>
+                            <div class="form-text text-muted">Paste link YouTube video bạn muốn thêm</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="customTitle" class="form-label text-light">
+                                <i class="fas fa-edit me-1"></i> Tiêu đề tùy chỉnh (tùy chọn)
+                            </label>
+                            <input type="text" class="form-control bg-secondary text-white border-secondary" 
+                                   id="customTitle" 
+                                   placeholder="Để trống để dùng tiêu đề gốc">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="customDescription" class="form-label text-light">
+                                <i class="fas fa-align-left me-1"></i> Mô tả tùy chỉnh (tùy chọn)
+                            </label>
+                            <textarea class="form-control bg-secondary text-white border-secondary" 
+                                      id="customDescription" 
+                                      rows="2" 
+                                      placeholder="Để trống để dùng mô tả tự động"></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="fas fa-plus me-1"></i> Thêm video
+                        </button>
+                    </form>
+                    
+                    <!-- Preview Area -->
+                    <div id="videoPreview" class="mt-3" style="display: none;">
+                        <hr class="border-secondary">
+                        <h6 class="text-warning mb-2">
+                            <i class="fas fa-eye me-1"></i> Xem trước:
+                        </h6>
+                        <div id="previewContent" class="text-light small"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="col-lg-5 mb-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-secondary d-flex justify-content-between align-items-center text-white">
+                    <span><i class="fas fa-list me-2"></i> Nhật ký hoạt động</span>
+                    <button class="btn btn-sm btn-outline-light" onclick="refreshLogs()">
+                        <i class="fas fa-sync"></i>
+                    </button>
+                </div>
+                <div class="card-body" style="max-height:400px; overflow-y:auto;">
+                    <div id="activityLogs">
+                        {% if logs %}
+                            {% for log in logs %}
+                            <div class="d-flex align-items-center mb-2 p-2 rounded" style="background: rgba(255,255,255,0.05);">
+                                <div class="flex-shrink-0 me-3">
+                                    {% if log[1] == 'SUCCESS' %}
+                                        <i class="fas fa-check-circle text-success"></i>
+                                    {% elif log[1] == 'ERROR' %}
+                                        <i class="fas fa-exclamation-circle text-danger"></i>
+                                    {% else %}
+                                        <i class="fas fa-info-circle text-info"></i>
+                                    {% endif %}
+                                </div>
+                                <div class="flex-grow-1">
+                                    <div class="text-white fw-bold mb-1">{{ log[2] }}</div>
+                                    <div class="text-info">
+                                        <i class="fas fa-clock me-1"></i>
+                                        {{ log[0] }} | Tìm thấy: <span class="text-warning">{{ log[3] }}</span> | Đã thêm: <span class="text-success">{{ log[4] }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-inbox fa-2x mb-2"></i>
+                                <div>Chưa có nhật ký hoạt động</div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Operations Modal -->
+<div class="modal fade" id="bulkOperationsModal" tabindex="-1" aria-labelledby="bulkOperationsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content bg-dark">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-white" id="bulkOperationsModalLabel">
+                    <i class="fas fa-tasks me-2"></i>Quản lý video hàng loạt
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Bulk Action Buttons -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="btn-group me-2" role="group">
+                            <button type="button" class="btn btn-outline-primary" onclick="selectAllVideos()">
+                                <i class="fas fa-check-square me-1"></i>Chọn tất cả
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="deselectAllVideos()">
+                                <i class="fas fa-square me-1"></i>Bỏ chọn tất cả
+                            </button>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-danger" onclick="deleteSelectedVideos()">
+                                <i class="fas fa-trash me-1"></i>Xóa đã chọn (<span id="selectedCount">0</span>)
+                            </button>
+                            <button type="button" class="btn btn-outline-warning" onclick="deleteAllVideos()">
+                                <i class="fas fa-trash-alt me-1"></i>Xóa tất cả
+                            </button>
+                            <button type="button" class="btn btn-outline-info" onclick="resetVideoIds()">
+                                <i class="fas fa-sync-alt me-1"></i>Reset ID
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Videos Table -->
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-dark table-striped">
+                        <thead class="sticky-top bg-secondary">
+                            <tr>
+                                <th width="50px">
+                                    <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                                </th>
+                                <th width="50px">ID</th>
+                                <th>Tiêu đề</th>
+                                <th width="150px">Kênh</th>
+                                <th width="120px">Ngày tạo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="videosTableBody">
+                            <!-- Videos will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div id="bulkLoadingIndicator" class="text-center py-4" style="display: none;">
+                    <div class="spinner-border text-warning" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="mt-2 text-muted">Đang tải danh sách video...</div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                <button type="button" class="btn btn-primary" onclick="refreshVideosList()">
+                    <i class="fas fa-sync me-1"></i>Làm mới
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load initial stats
+async function loadStats() {
+    try {
+        const res = await fetch('/admin/auto-update/stats');
+        const stats = await res.json();
+        
+        // Update status
+        document.getElementById('systemStatus').textContent = stats.enabled ? 'Đang hoạt động' : 'Tạm dừng';
+        document.getElementById('systemStatus').className = stats.enabled ? 'text-success' : 'text-warning';
+        
+        // Update toggle button text
+        document.getElementById('toggleText').textContent = stats.enabled ? 'Tạm dừng' : 'Kích hoạt';
+        
+        // Update stats
+        document.getElementById('totalVideos').textContent = stats.total_videos_added || 0;
+        
+        if (stats.last_successful_update) {
+            document.getElementById('lastUpdate').textContent = formatDateTime(stats.last_successful_update.timestamp);
+        } else {
+            document.getElementById('lastUpdate').textContent = 'Chưa có';
+        }
+        
+        // Calculate next run (estimate)
+        if (stats.enabled && stats.last_successful_update) {
+            const lastUpdate = new Date(stats.last_successful_update.timestamp);
+            const nextRun = new Date(lastUpdate.getTime() + (24 * 60 * 60 * 1000)); // 24 hours later
+            document.getElementById('nextRun').textContent = formatDateTime(nextRun.toISOString());
+        } else {
+            document.getElementById('nextRun').textContent = stats.enabled ? 'Sắp tới' : 'Tạm dừng';
+        }
+        
+        // Check API status
+        await checkApiStatus();
+        
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        document.getElementById('systemStatus').textContent = 'Lỗi tải dữ liệu';
+        document.getElementById('systemStatus').className = 'text-danger';
+    }
+}
+
+async function checkApiStatus() {
+    try {
+        const res = await fetch('/admin/check-api-status');
+        const result = await res.json();
+        
+        const apiStatusElement = document.getElementById('apiStatus');
+        
+        if (result.success) {
+            switch (result.status) {
+                case 'connected':
+                    apiStatusElement.textContent = 'Đã kết nối';
+                    apiStatusElement.className = 'badge bg-success';
+                    break;
+                case 'demo':
+                    apiStatusElement.textContent = 'Demo mode';
+                    apiStatusElement.className = 'badge bg-warning';
+                    break;
+                case 'error':
+                    apiStatusElement.textContent = 'Lỗi API';
+                    apiStatusElement.className = 'badge bg-danger';
+                    break;
+                default:
+                    apiStatusElement.textContent = 'Không rõ';
+                    apiStatusElement.className = 'badge bg-secondary';
+            }
+        } else {
+            apiStatusElement.textContent = 'Lỗi kiểm tra';
+            apiStatusElement.className = 'badge bg-danger';
+        }
+        
+    } catch (error) {
+        console.error('Error checking API status:', error);
+        const apiStatusElement = document.getElementById('apiStatus');
+        apiStatusElement.textContent = 'Lỗi kiểm tra';
+        apiStatusElement.className = 'badge bg-danger';
+    }
+}
+
+// Toggle auto-update
+async function toggleAutoUpdate() {
+    const button = document.getElementById('toggleAutoUpdate');
+    const toggleText = document.getElementById('toggleText');
+    
+    // Get current state
+    const currentEnabled = toggleText.textContent.includes('Tạm dừng');
+    const newEnabled = !currentEnabled;
+    
+    try {
+        button.disabled = true;
+        toggleText.textContent = 'Đang xử lý...';
+        
+        const response = await fetch('/admin/auto-update/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                enabled: newEnabled
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update UI
+            toggleText.textContent = newEnabled ? 'Tạm dừng' : 'Kích hoạt';
+            document.getElementById('systemStatus').textContent = newEnabled ? 'Đang hoạt động' : 'Tạm dừng';
+            document.getElementById('systemStatus').className = newEnabled ? 'text-success' : 'text-warning';
+            
+            // Show success message
+            showToast('success', result.message);
+            
+            // Reload stats after a delay
+            setTimeout(loadStats, 1000);
+        } else {
+            throw new Error(result.error || 'Không thể thay đổi trạng thái');
+        }
+        
+    } catch (error) {
+        console.error('Toggle error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+        
+        // Reset button text
+        toggleText.textContent = currentEnabled ? 'Tạm dừng' : 'Kích hoạt';
+    } finally {
+        button.disabled = false;
+    }
+}
+
+// Run manual update
+async function runManualUpdate() {
+    const button = document.getElementById('runManualUpdate');
+    
+    try {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Đang chạy...';
+        
+        const response = await fetch('/admin/auto-update/run-manual', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', 'Đã bắt đầu cập nhật thủ công!');
+            
+            // Reload page after a delay to show new logs
+            setTimeout(() => {
+                location.reload();
+            }, 2000);
+        } else {
+            throw new Error(result.error || 'Không thể chạy cập nhật thủ công');
+        }
+        
+    } catch (error) {
+        console.error('Manual update error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-play me-1"></i>Chạy thủ công';
+        }, 3000);
+    }
+}
+
+// Utility functions
+function formatDateTime(isoString) {
+    if (!isoString) return 'Chưa có';
+    const date = new Date(isoString);
+    
+    // Convert to Vietnam timezone (UTC+7)
+    const vietnamTime = new Date(date.getTime() + (7 * 60 * 60 * 1000));
+    
+    return vietnamTime.toLocaleString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit', 
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'Asia/Ho_Chi_Minh'
+    });
+}
+
+function showToast(type, message) {
+    // Simple toast notification
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : 'danger'} position-fixed`;
+    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    toast.innerHTML = `
+        <div class="d-flex align-items-center">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2"></i>
+            ${message}
+            <button type="button" class="btn-close btn-close-${type === 'success' ? 'white' : ''} ms-auto" onclick="this.parentElement.parentElement.remove()"></button>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.remove();
+        }
+    }, 5000);
+}
+
+function refreshLogs() {
+    location.reload();
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+    
+    // Bind button events
+    document.getElementById('toggleAutoUpdate').addEventListener('click', toggleAutoUpdate);
+    document.getElementById('runManualUpdate').addEventListener('click', runManualUpdate);
+    document.getElementById('manageBulkOperations').addEventListener('click', openBulkOperationsModal);
+    
+    // Auto-refresh stats every 30 seconds
+    setInterval(loadStats, 30000);
+});
+
+// Bulk Operations Functions
+let allVideos = [];
+let selectedVideos = [];
+
+async function openBulkOperationsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('bulkOperationsModal'));
+    modal.show();
+    
+    // Load videos when modal opens
+    await loadVideosList();
+}
+
+async function loadVideosList() {
+    const loadingIndicator = document.getElementById('bulkLoadingIndicator');
+    const tableBody = document.getElementById('videosTableBody');
+    
+    try {
+        loadingIndicator.style.display = 'block';
+        tableBody.innerHTML = '';
+        
+        const response = await fetch('/admin/auto-update/get-videos');
+        const data = await response.json();
+        
+        if (data.videos) {
+            allVideos = data.videos;
+            renderVideosTable(allVideos);
+        } else {
+            throw new Error(data.error || 'Failed to load videos');
+        }
+        
+    } catch (error) {
+        console.error('Error loading videos:', error);
+        showToast('error', 'Lỗi tải danh sách video: ' + error.message);
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Lỗi tải dữ liệu</td></tr>';
+    } finally {
+        loadingIndicator.style.display = 'none';
+    }
+}
+
+function renderVideosTable(videos) {
+    const tableBody = document.getElementById('videosTableBody');
+    
+    if (videos.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Không có video nào</td></tr>';
+        return;
+    }
+    
+    tableBody.innerHTML = videos.map(video => `
+        <tr>
+            <td>
+                <input type="checkbox" class="video-checkbox" value="${video.id}" 
+                       onchange="updateSelectedVideos()">
+            </td>
+            <td><span class="badge bg-primary">${video.id}</span></td>
+            <td class="text-truncate" style="max-width: 300px;" title="${video.title}">
+                ${video.title}
+            </td>
+            <td class="text-truncate" style="max-width: 150px;" title="${video.channel}">
+                ${video.channel || 'N/A'}
+            </td>
+            <td class="text-muted small">
+                ${formatDateTime(video.created_at)}
+            </td>
+        </tr>
+    `).join('');
+    
+    updateSelectedVideos();
+}
+
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    const videoCheckboxes = document.querySelectorAll('.video-checkbox');
+    
+    videoCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+    });
+    
+    updateSelectedVideos();
+}
+
+function selectAllVideos() {
+    document.getElementById('selectAllCheckbox').checked = true;
+    toggleSelectAll();
+}
+
+function deselectAllVideos() {
+    document.getElementById('selectAllCheckbox').checked = false;
+    toggleSelectAll();
+}
+
+function updateSelectedVideos() {
+    const videoCheckboxes = document.querySelectorAll('.video-checkbox:checked');
+    selectedVideos = Array.from(videoCheckboxes).map(cb => parseInt(cb.value));
+    
+    // Update selected count
+    document.getElementById('selectedCount').textContent = selectedVideos.length;
+    
+    // Update select all checkbox state
+    const allCheckboxes = document.querySelectorAll('.video-checkbox');
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    
+    if (selectedVideos.length === 0) {
+        selectAllCheckbox.indeterminate = false;
+        selectAllCheckbox.checked = false;
+    } else if (selectedVideos.length === allCheckboxes.length) {
+        selectAllCheckbox.indeterminate = false;
+        selectAllCheckbox.checked = true;
+    } else {
+        selectAllCheckbox.indeterminate = true;
+    }
+}
+
+async function deleteSelectedVideos() {
+    if (selectedVideos.length === 0) {
+        showToast('warning', 'Vui lòng chọn ít nhất một video để xóa');
+        return;
+    }
+    
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedVideos.length} video đã chọn?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/admin/auto-update/bulk-operations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'delete_selected',
+                video_ids: selectedVideos
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', result.message);
+            await loadVideosList(); // Refresh list
+        } else {
+            throw new Error(result.error || 'Lỗi xóa video');
+        }
+        
+    } catch (error) {
+        console.error('Delete error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+    }
+}
+
+async function deleteAllVideos() {
+    if (!confirm('⚠️ CẢNH BÁO: Bạn có chắc chắn muốn xóa TẤT CẢ video?\n\nHành động này không thể hoàn tác!')) {
+        return;
+    }
+    
+    if (!confirm('Xác nhận lần cuối: XÓA TẤT CẢ VIDEO?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/admin/auto-update/bulk-operations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'delete_all'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', result.message);
+            await loadVideosList(); // Refresh list
+        } else {
+            throw new Error(result.error || 'Lỗi xóa tất cả video');
+        }
+        
+    } catch (error) {
+        console.error('Delete all error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+    }
+}
+
+async function resetVideoIds() {
+    if (!confirm('Bạn có muốn reset tất cả ID video về dạng 1, 2, 3, ...?\n\nDiều này sẽ sắp xếp lại ID theo thứ tự tạo.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/admin/auto-update/bulk-operations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                operation: 'reset_ids'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', result.message);
+            await loadVideosList(); // Refresh list
+        } else {
+            throw new Error(result.error || 'Lỗi reset ID');
+        }
+        
+    } catch (error) {
+        console.error('Reset IDs error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+    }
+}
+
+async function refreshVideosList() {
+    await loadVideosList();
+    showToast('success', 'Đã làm mới danh sách video');
+}
+
+// Manual Add Video Functions
+document.getElementById('manualAddForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    await addManualVideo();
+});
+
+document.getElementById('youtubeUrl').addEventListener('input', function(e) {
+    const url = e.target.value.trim();
+    if (url && isValidYouTubeUrl(url)) {
+        previewVideo(url);
+    } else {
+        hidePreview();
+    }
+});
+
+function isValidYouTubeUrl(url) {
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+        /youtube\.com\/watch\?.*?v=([a-zA-Z0-9_-]{11})/
+    ];
+    return patterns.some(pattern => pattern.test(url));
+}
+
+async function previewVideo(url) {
+    try {
+        const response = await fetch('/admin/preview-youtube', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: url })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showPreview(result.video_info);
+        } else {
+            hidePreview();
+        }
+    } catch (error) {
+        console.error('Preview error:', error);
+        hidePreview();
+    }
+}
+
+function showPreview(videoInfo) {
+    const previewDiv = document.getElementById('videoPreview');
+    const previewContent = document.getElementById('previewContent');
+    
+    previewContent.innerHTML = `
+        <div class="d-flex align-items-start">
+            <img src="${videoInfo.thumbnail}" alt="Thumbnail" class="me-2 rounded" style="width: 60px; height: 45px; object-fit: cover;">
+            <div>
+                <div class="fw-bold text-warning">${videoInfo.title}</div>
+                <div class="text-muted small">Kênh: ${videoInfo.channel}</div>
+                <div class="text-info small">ID: ${videoInfo.video_id}</div>
+            </div>
+        </div>
+    `;
+    
+    previewDiv.style.display = 'block';
+}
+
+function hidePreview() {
+    document.getElementById('videoPreview').style.display = 'none';
+}
+
+async function addManualVideo() {
+    const url = document.getElementById('youtubeUrl').value.trim();
+    const customTitle = document.getElementById('customTitle').value.trim();
+    const customDescription = document.getElementById('customDescription').value.trim();
+    
+    if (!url) {
+        showToast('error', 'Vui lòng nhập URL YouTube');
+        return;
+    }
+    
+    if (!isValidYouTubeUrl(url)) {
+        showToast('error', 'URL YouTube không hợp lệ');
+        return;
+    }
+    
+    try {
+        // Show loading
+        const submitBtn = document.querySelector('#manualAddForm button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Đang thêm...';
+        submitBtn.disabled = true;
+        
+        const response = await fetch('/admin/add-manual-video', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url: url,
+                custom_title: customTitle,
+                custom_description: customDescription
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', `✅ ${result.message}`);
+            
+            // Reset form
+            document.getElementById('manualAddForm').reset();
+            hidePreview();
+            
+            // Refresh stats
+            await loadStats();
+            
+        } else {
+            throw new Error(result.error || 'Lỗi thêm video');
+        }
+        
+    } catch (error) {
+        console.error('Add manual video error:', error);
+        showToast('error', 'Lỗi: ' + error.message);
+    } finally {
+        // Restore button
+        const submitBtn = document.querySelector('#manualAddForm button[type="submit"]');
+        submitBtn.innerHTML = '<i class="fas fa-plus me-1"></i> Thêm video';
+        submitBtn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

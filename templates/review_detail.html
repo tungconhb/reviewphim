@@ -1,0 +1,725 @@
+{% extends "base.html" %}
+
+{% block title %}{{ review[1] }} - ReviewChill{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row">
+        <!-- Video Player Section -->
+        <div class="col-lg-8">
+            <div class="video-player-section mb-4">
+                {% if embed_url %}
+                    <div class="video-container">
+                        {% if review[5] == 'youtube' %}
+                            <iframe id="youtube-player" 
+                                    src="{{ embed_url }}?enablejsapi=1" 
+                                    frameborder="0" 
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                    allowfullscreen
+                                    class="youtube-player-no-suggestions">
+                            </iframe>
+                        {% elif review[5] == 'facebook' %}
+                            <iframe src="{{ embed_url }}&show_text=false&width=560" 
+                                    style="border:none;overflow:hidden" 
+                                    scrolling="no" 
+                                    frameborder="0" 
+                                    allowfullscreen="true" 
+                                    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share">
+                            </iframe>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <div class="video-error">
+                        <i class="fas fa-exclamation-triangle display-4 text-warning mb-3"></i>
+                        <h4 class="text-white">Video không khả dụng</h4>
+                        <p class="text-muted">Xin lỗi, video này hiện không thể phát được.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Video Info -->
+            <div class="video-info-card">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <h1 class="video-title">{{ review[1] }}</h1>
+                    <div class="rating-large">
+                        <i class="fas fa-star text-warning"></i>
+                        <span class="fw-bold text-warning">{{ review[8] }}/10</span>
+                    </div>
+                </div>
+
+                <div class="video-meta mb-3">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="meta-item">
+                                <i class="fas fa-film text-warning me-2"></i>
+                                <strong>Phim:</strong> {{ review[2] }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="meta-item">
+                                <i class="fas fa-user text-warning me-2"></i>
+                                <strong>Reviewer:</strong> {{ review[3] }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="meta-item">
+                                <i class="fab fa-{{ review[5] }} text-warning me-2"></i>
+                                <strong>Platform:</strong> {{ review[5].title() }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="meta-item">
+                                <i class="fas fa-clock text-warning me-2"></i>
+                                <strong>Ngày đăng:</strong> {{ review[10] }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="video-description">
+                    <h5 class="text-white mb-3">
+                        <i class="fas fa-align-left text-warning me-2"></i>Mô tả
+                    </h5>
+                    <p class="text-light">{{ review[7] }}</p>
+                </div>
+
+                <div class="video-actions mt-4">
+                    {% if review[9] %}
+                        <a href="{{ review[9] }}" target="_blank" class="btn btn-warning btn-lg me-3">
+                            <i class="fas fa-external-link-alt me-2"></i>
+                            Xem phim tại MotChill
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Movie Info Card -->
+            <div class="sidebar-card">
+                <h5 class="sidebar-title">
+                    <i class="fas fa-info-circle text-warning me-2"></i>
+                    Thông tin phim
+                </h5>
+                
+                <div class="movie-info">
+                    <h6 class="text-white">{{ review[2] }}</h6>
+                    <p class="text-muted mb-3">
+                        Đánh giá từ video review: {{ review[8] }}/10 ⭐
+                    </p>
+                    
+                    {% if review[9] %}
+                        <a href="{{ review[9] }}" target="_blank" class="btn btn-warning w-100">
+                            <i class="fas fa-play me-1"></i>
+                            Xem phim ngay
+                        </a>
+                    {% else %}
+                        <p class="text-muted">Chưa có link phim</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Related Videos Section -->
+            <div class="sidebar-card mt-4" id="related-videos-section">
+                <h5 class="sidebar-title">
+                    <i class="fas fa-video text-warning me-2"></i>
+                    Video đề xuất
+                </h5>
+                
+                <div id="related-videos-container">
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-spinner fa-spin me-2"></i>
+                        Đang tải video đề xuất...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <a href="{{ url_for('index') }}" class="btn btn-outline-warning">
+                <i class="fas fa-arrow-left me-1"></i>
+                Trở về trang chủ
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Global variables for video tracking
+let isVideoEnded = false;
+let relatedVideosLoaded = false;
+let currentVideoId = {{ review[0] }};
+
+function shareVideo() {
+    if (navigator.share) {
+        navigator.share({
+            title: '{{ review[1] }}',
+            text: 'Xem video review: {{ review[1] }}',
+            url: window.location.href
+        });
+    } else {
+        copyLink();
+    }
+}
+
+function shareToFacebook() {
+    const url = encodeURIComponent(window.location.href);
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
+}
+
+function shareToTwitter() {
+    const url = encodeURIComponent(window.location.href);
+    const text = encodeURIComponent('Xem video review: {{ review[1] }}');
+    window.open(`https://twitter.intent/tweet?url=${url}&text=${text}`, '_blank');
+}
+
+function copyLink() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+        // Show toast notification
+        const toast = document.createElement('div');
+        toast.className = 'toast-notification';
+        toast.innerHTML = '<i class="fas fa-check me-1"></i> Đã sao chép link!';
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    });
+}
+
+// Function to load related videos
+async function loadRelatedVideos() {
+    if (relatedVideosLoaded) return;
+    
+    try {
+        const response = await fetch(`/api/get_related_videos/${currentVideoId}`);
+        const data = await response.json();
+        
+        if (data.success && data.videos.length > 0) {
+            displayRelatedVideos(data.videos);
+            relatedVideosLoaded = true;
+        }
+    } catch (error) {
+        console.error('Error loading related videos:', error);
+    }
+}
+
+// Function to display related videos
+function displayRelatedVideos(videos) {
+    const container = document.getElementById('related-videos-container');
+    const section = document.getElementById('related-videos-section');
+    
+    container.innerHTML = '';
+    
+    videos.forEach(video => {
+        const videoElement = document.createElement('div');
+        videoElement.className = 'related-video-item mb-3';
+        
+        // Build classification badges
+        let badges = '';
+        if (video.country && video.country !== 'Unknown') {
+            badges += `<span class="badge bg-warning text-dark me-1"><i class="fas fa-globe me-1"></i>${video.country}</span>`;
+        }
+        if (video.genre && video.genre !== 'Unknown') {
+            badges += `<span class="badge bg-info me-1"><i class="fas fa-tags me-1"></i>${video.genre}</span>`;
+        }
+        if (video.series_name) {
+            badges += `<span class="badge bg-success me-1"><i class="fas fa-tv me-1"></i>Phim bộ</span>`;
+        }
+        
+        videoElement.innerHTML = `
+            <div class="card bg-dark border-secondary">
+                <div class="row g-0">
+                    <div class="col-4">
+                        <div class="related-video-thumbnail">
+                            ${video.thumbnail_url ? 
+                                `<img src="${video.thumbnail_url}" class="img-fluid rounded-start" alt="${video.title}" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                 <div class="placeholder-thumb" style="display: none;">
+                                     <i class="fas fa-film text-primary"></i>
+                                 </div>` :
+                                `<div class="placeholder-thumb">
+                                     <i class="fas fa-film text-primary"></i>
+                                 </div>`
+                            }
+                            <div class="rating-badge-small">
+                                <i class="fas fa-star"></i> ${video.rating}/10
+                            </div>
+                            ${video.episode_number ? `<div class="episode-badge-small">Tập ${video.episode_number}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="col-8">
+                        <div class="card-body p-2">
+                            <h6 class="card-title text-white small mb-1">${video.movie_title}</h6>
+                            <p class="card-text text-muted small mb-1">${video.reviewer_name}</p>
+                            <div class="movie-meta-small mb-2">
+                                ${badges}
+                            </div>
+                            <a href="/review/${video.id}" class="btn btn-warning btn-sm">
+                                <i class="fas fa-play me-1"></i>Xem
+                            </a>
+                            ${video.series_name ? `<a href="/series/${encodeURIComponent(video.series_name)}" class="btn btn-outline-primary btn-sm"><i class="fas fa-list me-1"></i>Bộ</a>` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.appendChild(videoElement);
+    });
+    
+    section.style.display = 'block';
+}
+
+// YouTube Player API - Chính thức
+let player;
+
+function onYouTubeIframeAPIReady() {
+    console.log('YouTube IFrame API ready, initializing player...');
+    
+    player = new YT.Player('youtube-player', {
+        events: {
+            'onStateChange': onPlayerStateChange,
+            'onReady': onPlayerReady
+        }
+    });
+}
+
+function onPlayerReady(event) {
+    console.log('YouTube player is ready');
+    
+    // Check if autoplay is requested via URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('autoplay') === '1') {
+        console.log('🎬 Autoplay requested - starting video automatically');
+        try {
+            event.target.playVideo();
+        } catch (e) {
+            console.log('⚠️ Autoplay blocked by browser, user needs to interact');
+        }
+    }
+    
+    // Load related videos ngay khi player ready
+    if (!relatedVideosLoaded) {
+        console.log('Loading related videos on player ready...');
+        loadRelatedVideos();
+    }
+}
+
+function onPlayerStateChange(event) {
+    console.log('Player state changed to:', event.data);
+    
+    if (event.data === YT.PlayerState.ENDED) {
+        console.log('Video ended - triggering handleVideoEnd');
+        handleVideoEnd();
+    }
+}
+// Load YouTube API script
+if (!window.YT) {
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+}
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, waiting for YouTube API...');
+    
+    // If YT API already loaded, initialize immediately
+    if (window.YT && window.YT.Player) {
+        onYouTubeIframeAPIReady();
+    }
+});
+
+
+// Function to handle video end
+function handleVideoEnd() {
+    console.log('handleVideoEnd called, isVideoEnded:', isVideoEnded);
+    if (isVideoEnded) return;
+    isVideoEnded = true;
+    
+    console.log('Processing video end...');
+    
+    // Load and show related videos if not already loaded
+    if (!relatedVideosLoaded) {
+        console.log('Loading related videos...');
+        loadRelatedVideos().then(() => {
+            console.log('Related videos loaded, starting auto redirect...');
+            startAutoRedirect();
+        });
+    } else {
+        console.log('Related videos already loaded, showing section and starting auto redirect...');
+        document.getElementById('related-videos-section').style.display = 'block';
+        startAutoRedirect();
+    }
+    
+    // Scroll to related videos section
+    setTimeout(() => {
+        const relatedSection = document.getElementById('related-videos-section');
+        if (relatedSection) {
+            relatedSection.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, 1000);
+}
+
+// Debug function to test auto redirect manually
+function testAutoRedirect() {
+    console.log('Testing auto redirect...');
+    handleVideoEnd();
+}
+
+// Auto-redirect functionality
+let redirectTimer;
+let countdownInterval;
+let nextVideoUrl = null;
+
+function startAutoRedirect() {
+    console.log('startAutoRedirect called');
+    // Get the first recommended video
+    setTimeout(() => {
+        const firstVideoLink = document.querySelector('#related-videos-container a[href^="/review/"]');
+        console.log('Looking for first video link:', firstVideoLink);
+        if (firstVideoLink) {
+            nextVideoUrl = firstVideoLink.href;
+            console.log('Found next video URL:', nextVideoUrl);
+            showCountdownToast();
+        } else {
+            console.log('No related video found for auto redirect');
+        }
+    }, 2000); // Wait a bit for videos to load
+}
+
+function showCountdownToast() {
+    let countdown = 30;
+    
+    // Create countdown toast
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification countdown-toast';
+    toast.id = 'countdown-toast';
+    
+    function updateToast() {
+        toast.innerHTML = `
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <i class="fas fa-play-circle text-warning me-2"></i>
+                    <span>Tự động chuyển video sau <strong>${countdown}s</strong></span>
+                </div>
+                <div>
+                    <button class="btn btn-sm btn-outline-light me-2" onclick="cancelAutoRedirect()">Hủy</button>
+                    <button class="btn btn-sm btn-warning" onclick="redirectNow()">Xem ngay</button>
+                </div>
+            </div>
+        `;
+    }
+    
+    updateToast();
+    document.body.appendChild(toast);
+    
+    // Start countdown
+    countdownInterval = setInterval(() => {
+        countdown--;
+        updateToast();
+        
+        if (countdown <= 0) {
+            clearInterval(countdownInterval);
+            redirectToNextVideo();
+        }
+    }, 1000);
+    
+    // Auto redirect after 30 seconds
+    redirectTimer = setTimeout(() => {
+        redirectToNextVideo();
+    }, 30000);
+}
+
+function cancelAutoRedirect() {
+    clearTimeout(redirectTimer);
+    clearInterval(countdownInterval);
+    const toast = document.getElementById('countdown-toast');
+    if (toast) {
+        toast.remove();
+    }
+    
+    // Show cancellation message
+    const cancelToast = document.createElement('div');
+    cancelToast.className = 'toast-notification cancel-toast';
+    cancelToast.innerHTML = `
+        <div class="d-flex align-items-center">
+            <i class="fas fa-times-circle text-danger me-2"></i>
+            <span>Đã hủy tự động chuyển video</span>
+        </div>
+    `;
+    document.body.appendChild(cancelToast);
+    
+    setTimeout(() => {
+        cancelToast.remove();
+    }, 3000);
+}
+
+function redirectNow() {
+    clearTimeout(redirectTimer);
+    clearInterval(countdownInterval);
+    redirectToNextVideo();
+}
+
+function redirectToNextVideo() {    
+    const toast = document.getElementById('countdown-toast');
+    if (toast) {
+        toast.remove();
+    }
+    
+    if (nextVideoUrl) {
+        // Show loading message
+        const loadingToast = document.createElement('div');
+        loadingToast.className = 'toast-notification loading-toast';
+        loadingToast.innerHTML = `
+            <div class="d-flex align-items-center">
+                <i class="fas fa-spinner fa-spin text-primary me-2"></i>
+                <span>Đang chuyển video...</span>
+            </div>
+        `;
+        document.body.appendChild(loadingToast);
+        
+        // Redirect after short delay for smooth transition
+        setTimeout(() => {
+            // Add autoplay parameter to next video URL
+            const autoplayUrl = nextVideoUrl + (nextVideoUrl.includes('?') ? '&' : '?') + 'autoplay=1';
+            console.log('🎬 Auto-redirecting with autoplay to:', autoplayUrl);
+            window.location.href = autoplayUrl;
+        }, 1000);
+    }
+}
+
+// Alternative method to detect video progress (fallback)
+function checkVideoProgress() {
+    const iframe = document.querySelector('iframe[src*="youtube.com"]');
+    if (iframe && !isVideoEnded) {
+        // Load related videos after 30 seconds of viewing (fallback)
+        setTimeout(() => {
+            if (!relatedVideosLoaded) {
+                loadRelatedVideos();
+            }
+        }, 30000);
+    }
+}
+
+// Add smooth scrolling for internal links
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM Content Loaded - Initializing video player...');
+    
+    // Auto-adjust video player size
+    const videoContainer = document.querySelector('.video-container');
+    if (videoContainer) {
+        const iframe = videoContainer.querySelector('iframe');
+        if (iframe) {
+            iframe.style.width = '100%';
+            iframe.style.height = '450px';
+            console.log('Video iframe dimensions set');
+        }
+    }
+    
+    // Initialize YouTube API detection
+    onYouTubeIframeAPIReady();
+    
+    // Load related videos after page load (for better UX)
+    setTimeout(() => {
+        if (!relatedVideosLoaded) {
+            console.log('Loading related videos on page load...');
+            loadRelatedVideos();
+        }
+    }, 2000);
+    
+    // Add debug button for testing (remove in production)
+    console.log('Video player initialized. Use testAutoRedirect() in console to test auto-redirect.');
+});
+</script>
+
+<style>
+.toast-notification {
+    position: fixed;
+    top: 100px;
+    right: 20px;
+    background: var(--warning);
+    color: black;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    font-weight: bold;
+}
+
+.video-end-toast {
+    background: #28a745;
+    color: white;
+    padding: 15px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 350px;
+}
+
+.related-video-item {
+    transition: transform 0.2s ease;
+}
+
+.related-video-item:hover {
+    transform: translateY(-2px);
+}
+
+.related-video-thumbnail {
+    position: relative;
+    height: 80px;
+    overflow: hidden;
+}
+
+.related-video-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.placeholder-thumb {
+    width: 100%;
+    height: 100%;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+}
+
+.rating-badge-small {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(255, 193, 7, 0.9);
+    color: black;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: bold;
+}
+
+.sidebar-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.sidebar-title {
+    color: #fff;
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.episode-badge-small {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    background: rgba(0, 123, 255, 0.9);
+    color: white;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: bold;
+}
+
+.movie-meta-small .badge {
+    font-size: 0.6rem;
+    padding: 2px 5px;
+}
+
+/* Auto-redirect toast styles */
+.countdown-toast {
+    background: #007bff;
+    color: white;
+    padding: 15px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 450px;
+    min-width: 350px;
+}
+
+.countdown-toast button {
+    border: 1px solid rgba(255,255,255,0.3);
+    transition: all 0.2s ease;
+}
+
+.countdown-toast button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.cancel-toast {
+    background: #dc3545;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 300px;
+}
+
+.loading-toast {
+    background: #17a2b8;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 250px;
+}
+
+.loading-toast .fa-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* YouTube iframe optimizations */
+.youtube-player-no-suggestions {
+    width: 100%;
+    height: 400px;
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.video-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Clean video container without overlay interference */
+.video-container {
+    position: relative;
+    width: 100%;
+    height: auto;
+}
+
+.video-container iframe {
+    width: 100%;
+    height: 450px;
+    border-radius: 8px;
+    border: none;
+}
+
+/* Clean YouTube player styling */
+.youtube-player-no-suggestions {
+    border: none !important;
+    outline: none !important;
+}
+
+
+</style>
+{% endblock %}
