@@ -40,6 +40,9 @@ def is_localhost():
 
 
 # ======= HOOK CHẶN ADMIN TOÀN HỆ THỐNG =======
+app = Flask(__name__)
+app.secret_key = "your-secret-key"
+
 @app.before_request
 def block_admin_on_render():
     """Chặn toàn bộ truy cập /admin nếu không phải localhost"""
