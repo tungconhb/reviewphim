@@ -1236,6 +1236,40 @@ def health_check():
     """Endpoint nhẹ cho UptimeRobot hoặc ping tự động"""
     return "OK", 200
 
+# === Tắt toàn bộ route admin khi không chạy localhost ===
+if not os.getenv("FLASK_ENV", "development") and not ("127.0.0.1" in os.getenv("HOST", "") or "localhost" in os.getenv("HOST", "")):
+    from flask import abort
+    for rule in list(app.url_map.iter_rules()):
+        if rule.rule.startswith("/admin"):
+            app.view_functions[rule.endpoint] = lambda *a, **kw: abort(403)
+    print("🚫 Chức năng quản trị đã bị tắt (chạy trên domain)")
+
+@app.route('/admin/view-logs', methods=['GET'])
+def view_logs_secure():
+    """Xem log truy cập an toàn (Render hoặc localhost đều dùng được)"""
+    secret = request.args.get('key', '')
+    if secret != ADMIN_SECRET:
+        return "🚫 Không được phép truy cập. Cung cấp key hợp lệ qua ?key=...", 403
+
+    try:
+        conn = sqlite3.connect(ACCESS_LOG_DB)
+        c = conn.cursor()
+        c.execute('SELECT * FROM access_logs ORDER BY date DESC LIMIT 100')
+        logs = c.fetchall()
+        conn.close()
+
+        html = """
+        <h2>📜 Access Logs (last 100)</h2>
+        <table border="1" cellpadding="6" cellspacing="0" style="width:100%; border-collapse:collapse;">
+        <tr style="background:#eee"><th>ID</th><th>Date</th><th>IP</th><th>URL</th><th>User-Agent</th></tr>
+        """
+        for log in logs:
+            html += f"<tr><td>{log[0]}</td><td>{log[1]}</td><td>{log[2]}</td><td>{log[3]}</td><td>{log[4]}</td></tr>"
+        html += "</table>"
+        return html
+    except Exception as e:
+        return f"Lỗi đọc log: {e}", 500
+
 if __name__ == '__main__':
     import threading, os
 
@@ -1264,9 +1298,9 @@ if __name__ == '__main__':
 
     # Auto-update (safe)
     try:
-        print("🚀 Initializing Auto-Update System...")
-        auto_update = get_auto_update(app)
-        print("✅ Auto-Update System ready!")
+        # 🚫 Tắt tính năng tự động cập nhật hằng ngày, chỉ cho phép cập nhật thủ công
+        print("🚫 Auto-Update System disabled (manual only)")
+        auto_update = None
     except Exception as e:
         print(f"⚠️ Auto-Update System failed: {e}")
         print("📝 Continuing without auto-update...")
