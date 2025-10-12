@@ -1,4 +1,4 @@
-/* ReviewChill - Video Review Platform Styles */
+/* Reviewphim - Video Review Platform Styles */
 
 :root {
     --primary-bg: #0d1117;
@@ -558,7 +558,30 @@ body {
     box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25);
     color: white;
 }
+/* Fix dropdown options visibility */
+.form-select option {
+    background-color: #2d3748 !important;
+    color: white !important;
+    padding: 8px 12px;
+}
 
+.form-select option:hover,
+.form-select option:checked,
+.form-select option:focus {
+    background-color: #4a5568 !important;
+    color: white !important;
+}
+
+/* Alternative solution for better browser compatibility */
+.form-select {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: white !important;
+}
+
+.form-select option {
+    background: #2d3748 !important;
+    color: white !important;
+}
 .form-label {
     color: var(--text-light);
     font-weight: 500;

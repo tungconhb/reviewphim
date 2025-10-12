@@ -86,45 +86,96 @@ def load_ai_model():
 def analyze_movie_info(title, description, tags=None):
     """Phân loại phim thông minh bằng mô hình ngôn ngữ"""
     try:
-        tags = tags or []  # 🔹 đảm bảo luôn có giá trị
+        tags = tags or []
+        text = f"{title} {description or ''} {' '.join(tags)}"
+
         if model is None:
-            # Fallback to manual classification if AI model fails
+            # Nếu không có model, fallback về manual
             return manual_classify_movie(title, description, tags)
-        
+
         from sentence_transformers import util
-        text = f"{title} {description or ''} {' '.join(tags or [])}"
+
+        # Encode text và genres
         emb_text = model.encode(text, convert_to_tensor=True)
         emb_genres = model.encode(GENRES, convert_to_tensor=True)
+
         scores = util.cos_sim(emb_text, emb_genres)
         best_genre = GENRES[int(scores.argmax())]
-        return best_genre
+
+        # Trả về dict đầy đủ các trường
+        return {
+            'country': 'Unknown',          # có thể cải thiện nếu muốn dựa vào title/description
+            'genre': best_genre,
+            'movie_type': 'Movie',         # mặc định 'Movie', nếu series có thể detect dựa vào title
+            'series_name': '',              # nếu là series có thể parse từ title
+            'episode_number': 0
+        }
+
     except Exception as e:
         print("⚠️ Lỗi AI phân loại:", e)
-        return manual_classify_movie(title, description, tags)
+        return {
+            'country': 'Unknown',
+            'genre': 'Unknown',
+            'movie_type': 'Movie',
+            'series_name': '',
+            'episode_number': 0
+        }
 
-def manual_classify_movie(title, description, tags):
-    """Manual classification fallback"""
-    text = f"{title} {description or ''} {' '.join(tags or [])}".lower()
-    
-    # Simple keyword-based classification
-    if any(word in text for word in ['hành động', 'action', 'chiến đấu', 'fight']):
-        return "Hành động"
-    elif any(word in text for word in ['kinh dị', 'horror', 'ma', 'ghost']):
-        return "Kinh dị"
-    elif any(word in text for word in ['tình cảm', 'romance', 'love', 'yêu']):
-        return "Tình cảm"
-    elif any(word in text for word in ['hài', 'comedy', 'funny', 'vui']):
-        return "Hài hước"
-    elif any(word in text for word in ['hoạt hình', 'animation', 'cartoon']):
-        return "Hoạt hình"
-    elif any(word in text for word in ['viễn tưởng', 'sci-fi', 'science fiction']):
-        return "Viễn tưởng"
-    elif any(word in text for word in ['tâm lý', 'psychological', 'drama']):
-        return "Tâm lý"
-    elif any(word in text for word in ['tài liệu', 'documentary']):
-        return "Tài liệu"
-    else:
-        return "Khác"
+def manual_classify_movie(title, description, tags=None):
+    """Phân loại phim thủ công thông minh khi AI không dùng được"""
+    tags = tags or []
+    text = f"{title} {description or ''} {' '.join(tags)}".lower()
+
+    # 1️⃣ Detect genre dựa vào từ khóa
+    genre_map = {
+        'action': ['action', 'hành động', 'fight', 'war', 'superhero', 'marvel', 'dc'],
+        'drama': ['drama', 'tình cảm', 'romance', 'love', 'tình yêu', 'emotional'],
+        'comedy': ['comedy', 'hài', 'funny', 'humor', 'hóm hỉnh'],
+        'horror': ['horror', 'kinh dị', 'ma', 'ghost', 'thriller'],
+        'sci-fi': ['sci-fi', 'science fiction', 'khoa học viễn tưởng', 'space', 'alien'],
+        'fantasy': ['fantasy', 'phép thuật', 'ma thuật', 'magical', 'supernatural'],
+        'animation': ['anime', 'animation', 'hoạt hình', 'cartoon'],
+        'documentary': ['documentary', 'tài liệu', 'doco'],
+        'crime': ['crime', 'tội phạm', 'murder', 'detective', 'police']
+    }
+    genre_detected = 'Unknown'
+    for g, keywords in genre_map.items():
+        if any(k in text for k in keywords):
+            genre_detected = g.title()
+            break
+
+    # 2️⃣ Detect country (nước sản xuất) dựa vào keywords
+    country_map = {
+        'USA': ['hollywood', 'us', 'america', 'mỹ'],
+        'Korea': ['korea', 'hàn quốc', 'k-drama', 'hàn'],
+        'Japan': ['japan', 'nhật bản', 'anime', 'j-drama'],
+        'China': ['china', 'trung quốc', 'c-drama', 'trung'],
+        'Vietnam': ['vietnam', 'việt nam', 'vn']
+    }
+    country_detected = 'Unknown'
+    for c, keywords in country_map.items():
+        if any(k in text for k in keywords):
+            country_detected = c
+            break
+
+    # 3️⃣ Detect if series
+    movie_type = 'Movie'
+    series_name = ''
+    episode_number = 0
+    ep_match = re.search(r'(tập|episode|ep)\s*(\d+)', text)
+    if ep_match:
+        movie_type = 'Series'
+        episode_number = int(ep_match.group(2))
+        # series_name là title trừ episode info
+        series_name = re.sub(r'(tập|episode|ep)\s*\d+', '', title, flags=re.I).strip()
+
+    return {
+        'country': country_detected,
+        'genre': genre_detected,
+        'movie_type': movie_type,
+        'series_name': series_name,
+        'episode_number': episode_number
+    }
 # =========================================
 
 
@@ -1236,40 +1287,6 @@ def health_check():
     """Endpoint nhẹ cho UptimeRobot hoặc ping tự động"""
     return "OK", 200
 
-# === Tắt toàn bộ route admin khi không chạy localhost ===
-if not os.getenv("FLASK_ENV", "development") and not ("127.0.0.1" in os.getenv("HOST", "") or "localhost" in os.getenv("HOST", "")):
-    from flask import abort
-    for rule in list(app.url_map.iter_rules()):
-        if rule.rule.startswith("/admin"):
-            app.view_functions[rule.endpoint] = lambda *a, **kw: abort(403)
-    print("🚫 Chức năng quản trị đã bị tắt (chạy trên domain)")
-
-@app.route('/admin/view-logs', methods=['GET'])
-def view_logs_secure():
-    """Xem log truy cập an toàn (Render hoặc localhost đều dùng được)"""
-    secret = request.args.get('key', '')
-    if secret != ADMIN_SECRET:
-        return "🚫 Không được phép truy cập. Cung cấp key hợp lệ qua ?key=...", 403
-
-    try:
-        conn = sqlite3.connect(ACCESS_LOG_DB)
-        c = conn.cursor()
-        c.execute('SELECT * FROM access_logs ORDER BY date DESC LIMIT 100')
-        logs = c.fetchall()
-        conn.close()
-
-        html = """
-        <h2>📜 Access Logs (last 100)</h2>
-        <table border="1" cellpadding="6" cellspacing="0" style="width:100%; border-collapse:collapse;">
-        <tr style="background:#eee"><th>ID</th><th>Date</th><th>IP</th><th>URL</th><th>User-Agent</th></tr>
-        """
-        for log in logs:
-            html += f"<tr><td>{log[0]}</td><td>{log[1]}</td><td>{log[2]}</td><td>{log[3]}</td><td>{log[4]}</td></tr>"
-        html += "</table>"
-        return html
-    except Exception as e:
-        return f"Lỗi đọc log: {e}", 500
-
 if __name__ == '__main__':
     import threading, os
 
@@ -1298,9 +1315,9 @@ if __name__ == '__main__':
 
     # Auto-update (safe)
     try:
-        # 🚫 Tắt tính năng tự động cập nhật hằng ngày, chỉ cho phép cập nhật thủ công
-        print("🚫 Auto-Update System disabled (manual only)")
-        auto_update = None
+        print("🚀 Initializing Auto-Update System...")
+        auto_update = get_auto_update(app)
+        print("✅ Auto-Update System ready!")
     except Exception as e:
         print(f"⚠️ Auto-Update System failed: {e}")
         print("📝 Continuing without auto-update...")
