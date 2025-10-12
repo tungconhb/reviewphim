@@ -1,18 +1,21 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
-import re
-from datetime import datetime
 import os
+from datetime import datetime
 
-# ======= RENDER / DEPLOY CONFIG (Đã chỉnh gọn & an toàn) =======
-ADMIN_SECRET = os.getenv("ADMIN_SECRET", "Ttung@051193")
+# ================== CONFIG CHUNG ==================
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "Ttung@051193")  # Bạn có thể đổi
 DISABLE_AI = os.getenv("DISABLE_AI", "false").lower() == "true"
 MODEL_NAME = os.getenv("AI_MODEL", "paraphrase-MiniLM-L3-v2")
 ACCESS_LOG_DB = os.getenv("ACCESS_LOG_DB", "access_logs.sqlite")
-PORT = int(os.getenv("PORT", 10000))  # ✅ Render sẽ set biến PORT khi deploy
+PORT = int(os.getenv("PORT", 10000))  # Render sẽ tự đặt PORT
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
-# ======= DB CONNECTOR (ổn định đa luồng và WAL) =======
+# ================== KHỞI TẠO APP ==================
+app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "your-secret-key")
+
+# ================== KẾT NỐI DATABASE ==================
 def get_conn(path='db.sqlite'):
     conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     try:
@@ -21,35 +24,38 @@ def get_conn(path='db.sqlite'):
         pass
     return conn
 
-# ======= HÀM CHẶN ADMIN KHI TRUY CẬP TỪ DOMAIN =======
-from flask import request
+# ================== XÁC ĐỊNH MÔI TRƯỜNG ==================
+def is_local_request():
+    """Kiểm tra có phải đang truy cập từ localhost không."""
+    if os.getenv("RENDER"):
+        return False  # Render luôn có biến môi trường này
 
-def is_localhost():
-    """Kiểm tra xem có phải truy cập nội bộ hay không."""
+    remote = request.remote_addr or ""
     host = request.host or ""
-    # Local test (Windows, localhost, 127.0.0.1)
-    if "127.0.0.1" in host or "localhost" in host:
+
+    # Local test
+    if "127.0.0.1" in remote or "localhost" in host:
         return True
-    # Render hoặc domain public
+
+    # Domain public
     if "onrender.com" in host or "render.com" in host:
         return False
-    # Render tự đặt biến môi trường này
-    if "RENDER" in os.environ:
-        return False
-    return True
 
+    return False
 
-# ======= HOOK CHẶN ADMIN TOÀN HỆ THỐNG =======
-app = Flask(__name__)
-app.secret_key = "your-secret-key"
-
+# ================== CHẶN /admin TRÊN DOMAIN PUBLIC ==================
 @app.before_request
-def block_admin_on_render():
-    """Chặn toàn bộ truy cập /admin nếu không phải localhost"""
-    if not is_localhost() and request.path.startswith('/admin'):
-        flash("Chức năng quản trị bị vô hiệu hóa trên môi trường online!", "error")
-        return redirect(url_for('index'))
-
+def block_admin_safe():
+    """Chỉ chặn /admin trên môi trường public, không ảnh hưởng đến API hoặc background job."""
+    try:
+        path = request.path or ""
+        # Chỉ chặn đúng /admin và các trang con
+        if path.startswith("/admin") and not is_local_request():
+            flash("🚫 Chức năng quản trị bị vô hiệu hóa trên môi trường online!", "error")
+            return redirect(url_for("index"))
+    except Exception:
+        # Nếu request không có context (background, internal call, etc)
+        pass
 
 # ======= THÔNG TIN HỆ THỐNG =======
 print("✅ Flask configuration loaded:")
