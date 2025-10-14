@@ -1,7 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+import pytz
+import re
+from urllib.parse import urlparse, parse_qs
 
 # ================== CONFIG CHUNG ==================
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "Ttung@051193")  # Bạn có thể đổi
@@ -24,38 +27,56 @@ def get_conn(path='db.sqlite'):
         pass
     return conn
 
-# ================== XÁC ĐỊNH MÔI TRƯỜNG ==================
-def is_local_request():
-    """Kiểm tra có phải đang truy cập từ localhost không."""
-    if os.getenv("RENDER"):
-        return False  # Render luôn có biến môi trường này
-
-    remote = request.remote_addr or ""
-    host = request.host or ""
-
-    # Local test
-    if "127.0.0.1" in remote or "localhost" in host:
-        return True
-
-    # Domain public
-    if "onrender.com" in host or "render.com" in host:
-        return False
-
-    return False
-
-# ================== CHẶN /admin TRÊN DOMAIN PUBLIC ==================
-@app.before_request
-def block_admin_safe():
-    """Chỉ chặn /admin trên môi trường public, không ảnh hưởng đến API hoặc background job."""
+# ================== HÀM HỖ TRỢ MÚI GIỜ VIỆT NAM ==================
+def convert_to_vietnam_time(utc_datetime_str):
+    """Chuyển đổi chuỗi datetime UTC thành datetime Việt Nam (UTC+7)"""
     try:
-        path = request.path or ""
-        # Chỉ chặn đúng /admin và các trang con
-        if path.startswith("/admin") and not is_local_request():
-            flash("🚫 Chức năng quản trị bị vô hiệu hóa trên môi trường online!", "error")
-            return redirect(url_for("index"))
-    except Exception:
-        # Nếu request không có context (background, internal call, etc)
-        pass
+        if not utc_datetime_str:
+            return 'Không xác định'
+        # Chuyển string thành datetime object (giả sử format là 'YYYY-MM-DD HH:MM:SS')
+        utc_dt = datetime.strptime(utc_datetime_str, '%Y-%m-%d %H:%M:%S')
+        # Thiết lập múi giờ UTC
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        # Chuyển sang múi giờ Việt Nam
+        vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        vn_dt = utc_dt.astimezone(vn_tz)
+        # Trả về string theo định dạng mong muốn
+        return vn_dt.strftime('%H:%M:%S %d/%m/%Y')
+    except Exception as e:
+        print(f"Error converting time: {e}")
+        return utc_datetime_str  # Trả về nguyên bản nếu có lỗi
+
+# ================== HÀM XÁC THỰC ADMIN ==================
+def is_valid_admin_key(key):
+    """Kiểm tra key admin có hợp lệ không"""
+    return key == ADMIN_SECRET
+
+@app.before_request
+def require_admin_auth():
+    path = request.path or ""
+    if not path.startswith("/admin"):
+        return  # Không phải route admin → bỏ qua
+
+    # Đã xác thực rồi → cho phép
+    if session.get("admin_authenticated"):
+        return
+
+    # Kiểm tra ?key=... nếu chưa xác thực
+    key = request.args.get("key")
+    if key and is_valid_admin_key(key):
+        session["admin_authenticated"] = True
+        return
+
+    # Không có quyền → chặn
+    flash("🚫 Truy cập quản trị yêu cầu xác thực!", "error")
+    return redirect(url_for("index"))
+
+# ================== ROUTE LOGOUT (TÙY CHỌN) ==================
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop("admin_authenticated", None)
+    flash("Đã đăng xuất khỏi chế độ quản trị.", "info")
+    return redirect(url_for("index"))
 
 # ======= THÔNG TIN HỆ THỐNG =======
 print("✅ Flask configuration loaded:")
@@ -64,7 +85,6 @@ print(f"   AI_MODEL: {MODEL_NAME}")
 print(f"   DEBUG: {FLASK_DEBUG}")
 print(f"   PORT: {PORT}")
 print(f"   DISABLE_AI: {DISABLE_AI}")
-
 
 # ==== AI PHÂN LOẠI PHIM THÔNG MINH ====
 # Initialize AI model with error handling
@@ -94,20 +114,15 @@ def analyze_movie_info(title, description, tags=None):
     try:
         tags = tags or []
         text = f"{title} {description or ''} {' '.join(tags)}"
-
         if model is None:
             # Nếu không có model, fallback về manual
             return manual_classify_movie(title, description, tags)
-
         from sentence_transformers import util
-
         # Encode text và genres
         emb_text = model.encode(text, convert_to_tensor=True)
         emb_genres = model.encode(GENRES, convert_to_tensor=True)
-
         scores = util.cos_sim(emb_text, emb_genres)
         best_genre = GENRES[int(scores.argmax())]
-
         # Trả về dict đầy đủ các trường
         return {
             'country': 'Unknown',          # có thể cải thiện nếu muốn dựa vào title/description
@@ -116,7 +131,6 @@ def analyze_movie_info(title, description, tags=None):
             'series_name': '',              # nếu là series có thể parse từ title
             'episode_number': 0
         }
-
     except Exception as e:
         print("⚠️ Lỗi AI phân loại:", e)
         return {
@@ -131,7 +145,6 @@ def manual_classify_movie(title, description, tags=None):
     """Phân loại phim thủ công thông minh khi AI không dùng được"""
     tags = tags or []
     text = f"{title} {description or ''} {' '.join(tags)}".lower()
-
     # 1️⃣ Detect genre dựa vào từ khóa
     genre_map = {
         'action': ['action', 'hành động', 'fight', 'war', 'superhero', 'marvel', 'dc'],
@@ -149,7 +162,6 @@ def manual_classify_movie(title, description, tags=None):
         if any(k in text for k in keywords):
             genre_detected = g.title()
             break
-
     # 2️⃣ Detect country (nước sản xuất) dựa vào keywords
     country_map = {
         'USA': ['hollywood', 'us', 'america', 'mỹ'],
@@ -163,7 +175,6 @@ def manual_classify_movie(title, description, tags=None):
         if any(k in text for k in keywords):
             country_detected = c
             break
-
     # 3️⃣ Detect if series
     movie_type = 'Movie'
     series_name = ''
@@ -174,7 +185,6 @@ def manual_classify_movie(title, description, tags=None):
         episode_number = int(ep_match.group(2))
         # series_name là title trừ episode info
         series_name = re.sub(r'(tập|episode|ep)\s*\d+', '', title, flags=re.I).strip()
-
     return {
         'country': country_detected,
         'genre': genre_detected,
@@ -182,17 +192,11 @@ def manual_classify_movie(title, description, tags=None):
         'series_name': series_name,
         'episode_number': episode_number
     }
+
 # =========================================
-
-
-from urllib.parse import urlparse, parse_qs
-
 # Auto-update system imports
 from services.auto_update_fixed import get_auto_update
 from services.youtube_url_parser import YouTubeURLParser
-
-app = Flask(__name__)
-app.secret_key = 'reviewchill_secret_key_2025'
 
 # Hàm phân tích tự động phim
 def analyze_country_info(title, movie_title):
@@ -200,7 +204,6 @@ def analyze_country_info(title, movie_title):
     title_lower = title.lower()
     movie_title_lower = movie_title.lower()
     combined_text = f"{title_lower} {movie_title_lower}"
-    
     # Phân tích quốc gia - Improved
     country = "Unknown"
     if any(keyword in combined_text for keyword in ['deadpool', 'avatar', 'spider-man', 'spiderman', 'marvel', 'dc', 'disney', 'hollywood', 'america', 'american']):
@@ -215,7 +218,6 @@ def analyze_country_info(title, movie_title):
         country = "Việt Nam"
     elif any(keyword in combined_text for keyword in ['thái lan', 'thailand', 'thai']):
         country = "Thái Lan"
-    
     # Phân tích thể loại - Improved with better priority
     genre = "Unknown"
     if any(keyword in combined_text for keyword in ['khoa học viễn tưởng', 'sci-fi', 'science fiction', 'siêu anh hùng', 'marvel', 'avengers', 'spider-man', 'spiderman', 'superman', 'batman']):
@@ -230,21 +232,15 @@ def analyze_country_info(title, movie_title):
         genre = "Tình cảm"
     elif any(keyword in combined_text for keyword in ['hài', 'comedy', 'funny', 'vui nhộn']):
         genre = "Hài"
-    
     # Phân tích loại phim (single hay series)
     movie_type = "single"
     series_name = None
     episode_number = None
-    
     # Tìm kiếm pattern cho phim bộ
-    import re
-    
-    # Pattern cho tập phim
     episode_patterns = [
         r'tập\s*(\d+)', r'episode\s*(\d+)', r'ep\s*(\d+)',
         r'phần\s*(\d+)', r'season\s*(\d+)', r'part\s*(\d+)'
     ]
-    
     for pattern in episode_patterns:
         match = re.search(pattern, combined_text)
         if match:
@@ -253,13 +249,11 @@ def analyze_country_info(title, movie_title):
             # Lấy tên bộ phim (loại bỏ phần tập)
             series_name = re.sub(pattern, '', movie_title, flags=re.IGNORECASE).strip()
             break
-    
     # Các từ khóa cho phim bộ
     series_keywords = ['phần', 'season', 'series', 'bộ', 'saga']
     if any(keyword in combined_text for keyword in series_keywords) and movie_type == "single":
         movie_type = "series"
         series_name = movie_title
-    
     return {
         'country': country,
         'genre': genre,
@@ -272,7 +266,6 @@ def analyze_country_info(title, movie_title):
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    
     # Tạo bảng video reviews với URL video và thông tin phân loại
     c.execute('''CREATE TABLE IF NOT EXISTS video_reviews (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,7 +285,6 @@ def init_db():
                     movie_type TEXT DEFAULT 'single',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )''')
-    
     # Thêm các cột mới nếu chưa có (migration)
     try:
         c.execute('ALTER TABLE video_reviews ADD COLUMN country TEXT DEFAULT "Unknown"')
@@ -314,11 +306,9 @@ def init_db():
         c.execute('ALTER TABLE video_reviews ADD COLUMN movie_type TEXT DEFAULT "single"')
     except:
         pass
-    
     # Cập nhật phân loại tự động cho các video hiện có
     c.execute('SELECT id, title, movie_title FROM video_reviews WHERE country = "Unknown" OR country IS NULL')
     existing_videos = c.fetchall()
-    
     for video in existing_videos:
         video_id, title, movie_title = video
         analysis = analyze_country_info(title, movie_title)
@@ -327,69 +317,13 @@ def init_db():
                     WHERE id=?''',
                     (analysis['country'], analysis['genre'], analysis['movie_type'], 
                      analysis['series_name'], analysis['episode_number'], video_id))
-    
-    # Thêm dữ liệu mẫu mới với phân loại đầy đủ
-    sample_reviews = [
-        (
-            'Review Avengers Endgame - Kết thúc hoàn hảo!',
-            'Avengers: Endgame',
-            'MovieReviewer VN',
-            'https://www.youtube.com/watch?v=TcMBFSGVi1c',
-            'youtube',
-            'TcMBFSGVi1c',
-            'Đánh giá chi tiết về bộ phim Avengers Endgame - cái kết hoàn hảo cho saga Infinity.',
-            9,
-            '',
-            'Mỹ',
-            'Khoa học viễn tưởng',
-            'Avengers',
-            4,
-            'series',
-            '2025-10-07 20:00:00'
-        ),
-        (
-            'Fast & Furious 9 - Hành động đỉnh cao',
-            'Fast & Furious 9',
-            'Action Movie Fan',
-            'https://www.youtube.com/watch?v=FUK2kdvn4jY',
-            'youtube',
-            'FUK2kdvn4jY',
-            'Review chi tiết về Fast & Furious 9 với những pha hành động ngoạn mục.',
-            8,
-            '',
-            'Mỹ',
-            'Hành động',
-            'Fast & Furious',
-            9,
-            'series',
-            '2025-10-07 19:30:00'
-        ),
-        (
-            'Spider-Man No Way Home - Đa vũ trụ tuyệt vời',
-            'Spider-Man: No Way Home',
-            'Marvel Vietnam',
-            'https://www.youtube.com/watch?v=JfVOs4VSpmA',
-            'youtube',
-            'JfVOs4VSpmA',
-            'Phân tích về Spider-Man No Way Home và concept đa vũ trụ tuyệt vời.',
-            10,
-            '',
-            'Mỹ',
-            'Khoa học viễn tưởng',
-            'Spider-Man',
-            3,
-            'series',
-            '2025-10-07 18:45:00'
-        )
-    ]
-    
+
     # Kiểm tra xem đã có dữ liệu chưa (chỉ thêm nếu ít hơn 5 video)
     c.execute('SELECT COUNT(*) FROM video_reviews')
     if c.fetchone()[0] < 5:
         c.executemany('''INSERT INTO video_reviews 
                         (title, movie_title, reviewer_name, video_url, video_type, video_id, description, rating, movie_link, country, genre, series_name, episode_number, movie_type, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', sample_reviews)
-    
     conn.commit()
     conn.close()
 
@@ -403,14 +337,12 @@ def extract_video_info(url):
         else:
             parsed_url = urlparse(url)
             video_id = parse_qs(parsed_url.query).get('v', [None])[0]
-        
         if video_id:
             return {
                 'type': 'youtube',
                 'id': video_id,
                 'embed_url': f'https://www.youtube.com/embed/{video_id}'
             }
-    
     elif 'facebook.com' in url:
         # Facebook Video URL
         # Có thể cần xử lý phức tạp hơn cho Facebook
@@ -419,7 +351,6 @@ def extract_video_info(url):
             'id': url.split('/')[-1],
             'embed_url': f'https://www.facebook.com/plugins/video.php?href={url}'
         }
-    
     return None
 
 @app.route('/')
@@ -429,7 +360,6 @@ def index():
     c.execute('''SELECT * FROM video_reviews ORDER BY created_at DESC''')
     reviews = c.fetchall()
     conn.close()
-    
     return render_template('index.html', reviews=reviews)
 
 @app.route('/review/<int:review_id>')
@@ -439,15 +369,12 @@ def review_detail(review_id):
     c.execute('SELECT * FROM video_reviews WHERE id = ?', (review_id,))
     review = c.fetchone()
     conn.close()
-    
     if not review:
         flash('Không tìm thấy review!', 'error')
         return redirect(url_for('index'))
-    
     # Tạo embed URL (Render-safe)
     video_url = review[4]
     embed_url = None
-
     if "youtube.com" in video_url or "youtu.be" in video_url:
         if "watch?v=" in video_url:
             video_id = video_url.split("watch?v=")[-1].split("&")[0]
@@ -457,15 +384,12 @@ def review_detail(review_id):
             video_id = None
         if video_id:
             embed_url = f"https://www.youtube.com/embed/{video_id}"
-
     elif "facebook.com" in video_url:
         embed_url = f"https://www.facebook.com/plugins/video.php?href={video_url}"
-
     else:
         # Có thể là link mp4 trực tiếp
         if video_url.lower().endswith(('.mp4', '.webm', '.ogg')):
             embed_url = video_url  # local or external direct link
-
     return render_template('review_detail.html', review=review, embed_url=embed_url)
 
 @app.route('/search')
@@ -473,45 +397,33 @@ def search():
     query = request.args.get('q', '')
     country = request.args.get('country', '')
     genre = request.args.get('genre', '')
-    
     if not query and not country and not genre:
         return redirect(url_for('index'))
-    
     conn = get_conn()
     c = conn.cursor()
-    
     # Xây dựng câu truy vấn động
     where_conditions = []
     params = []
-    
     if query:
         where_conditions.append('(title LIKE ? OR movie_title LIKE ? OR reviewer_name LIKE ?)')
         params.extend([f'%{query}%', f'%{query}%', f'%{query}%'])
-    
     if country and country != 'all':
         where_conditions.append('country = ?')
         params.append(country)
-    
     if genre and genre != 'all':
         where_conditions.append('genre = ?')
         params.append(genre)
-    
     where_clause = ' AND '.join(where_conditions) if where_conditions else '1=1'
-    
     c.execute(f'''SELECT * FROM video_reviews 
                 WHERE {where_clause}
                 ORDER BY created_at DESC''', params)
     reviews = c.fetchall()
-    
     # Lấy danh sách quốc gia và thể loại để hiển thị filter
     c.execute('SELECT DISTINCT country FROM video_reviews WHERE country IS NOT NULL ORDER BY country')
     countries = [row[0] for row in c.fetchall()]
-    
     c.execute('SELECT DISTINCT genre FROM video_reviews WHERE genre IS NOT NULL ORDER BY genre')
     genres = [row[0] for row in c.fetchall()]
-    
     conn.close()
-    
     return render_template('search.html', reviews=reviews, query=query, 
                          countries=countries, genres=genres, 
                          selected_country=country, selected_genre=genre)
@@ -522,42 +434,31 @@ def filter_movies():
     country = request.args.get('country', 'all')
     genre = request.args.get('genre', 'all')
     movie_type = request.args.get('type', 'all')
-    
     conn = get_conn()
     c = conn.cursor()
-    
     # Xây dựng câu truy vấn
     where_conditions = ['1=1']
     params = []
-    
     if country != 'all':
         where_conditions.append('country = ?')
         params.append(country)
-    
     if genre != 'all':
         where_conditions.append('genre = ?')
         params.append(genre)
-    
     if movie_type != 'all':
         where_conditions.append('movie_type = ?')
         params.append(movie_type)
-    
     where_clause = ' AND '.join(where_conditions)
-    
     c.execute(f'''SELECT * FROM video_reviews 
                 WHERE {where_clause}
                 ORDER BY rating DESC, created_at DESC''', params)
     reviews = c.fetchall()
-    
     # Lấy thống kê
     c.execute('SELECT DISTINCT country FROM video_reviews WHERE country IS NOT NULL ORDER BY country')
     countries = [row[0] for row in c.fetchall()]
-    
     c.execute('SELECT DISTINCT genre FROM video_reviews WHERE genre IS NOT NULL ORDER BY genre')
     genres = [row[0] for row in c.fetchall()]
-    
     conn.close()
-    
     return render_template('filter.html', reviews=reviews, 
                          countries=countries, genres=genres,
                          selected_country=country, selected_genre=genre, selected_type=movie_type)
@@ -572,60 +473,27 @@ def series_detail(series_name):
                 ORDER BY episode_number ASC, created_at ASC''', (series_name,))
     episodes = c.fetchall()
     conn.close()
-    
     if not episodes:
         flash(f'Không tìm thấy bộ phim "{series_name}"!', 'error')
         return redirect(url_for('index'))
-    
     return render_template('series_detail.html', episodes=episodes, series_name=series_name)
 
-# Helper function để kiểm tra localhost
-def is_localhost():
-    """Kiểm tra xem request có phải từ localhost không"""
-    remote_addr = request.environ.get('REMOTE_ADDR', '')
-    http_host = request.environ.get('HTTP_HOST', '')
-    
-    localhost_ips = ['127.0.0.1', '::1']
-    localhost_hosts = ['localhost', '127.0.0.1']
-    
-    # Kiểm tra IP
-    if remote_addr in localhost_ips:
-        return True
-    
-    # Kiểm tra host
-    if any(host in http_host for host in localhost_hosts):
-        return True
-    
-    return False
-
-# Admin routes (chỉ cho phép truy cập từ localhost)
+# Admin routes (bảo vệ bởi session)
 @app.route('/admin')
 def admin_dashboard():
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM video_reviews ORDER BY created_at DESC')
     reviews = c.fetchall()
     conn.close()
-    
     return render_template('admin/dashboard.html', reviews=reviews)
 
 @app.route('/admin/new')
 def admin_new_review():
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
     return render_template('admin/new_review.html')
 
 @app.route('/admin/add', methods=['POST'])
 def admin_add_review():
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     title = request.form['title']
     movie_title = request.form['movie_title']
     reviewer_name = request.form['reviewer_name']
@@ -633,16 +501,13 @@ def admin_add_review():
     description = request.form['description']
     rating = int(request.form['rating'])
     movie_link = request.form.get('movie_link', '')
-    
     # Trích xuất thông tin video
     video_info = extract_video_info(video_url)
     if not video_info:
         flash('URL video không hợp lệ! Hỗ trợ YouTube và Facebook.', 'error')
         return redirect(url_for('admin_new_review'))
-    
     # Tự động phân tích thông tin phim
     analysis = analyze_country_info(title, movie_title)
-    
     conn = get_conn()
     c = conn.cursor()
     c.execute('''INSERT INTO video_reviews 
@@ -654,34 +519,23 @@ def admin_add_review():
                  analysis['episode_number'], analysis['movie_type']))
     conn.commit()
     conn.close()
-    
     flash(f'Thêm video review thành công! Phân loại: {analysis["country"]} - {analysis["genre"]}', 'success')
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/edit/<int:review_id>')
 def admin_edit_review(review_id):
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT * FROM video_reviews WHERE id = ?', (review_id,))
     review = c.fetchone()
     conn.close()
-    
     if not review:
         flash('Không tìm thấy review!', 'error')
         return redirect(url_for('admin_dashboard'))
-    
     return render_template('admin/edit_review.html', review=review)
 
 @app.route('/admin/update/<int:review_id>', methods=['POST'])
 def admin_update_review(review_id):
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     title = request.form['title']
     movie_title = request.form['movie_title']
     reviewer_name = request.form['reviewer_name']
@@ -689,13 +543,11 @@ def admin_update_review(review_id):
     description = request.form['description']
     rating = int(request.form['rating'])
     movie_link = request.form['movie_link']
-    
     # Trích xuất thông tin video
     video_info = extract_video_info(video_url)
     if not video_info:
         flash('URL video không hợp lệ! Hỗ trợ YouTube và Facebook.', 'error')
         return redirect(url_for('admin_edit_review', review_id=review_id))
-    
     conn = get_conn()
     c = conn.cursor()
     c.execute('''UPDATE video_reviews 
@@ -706,61 +558,59 @@ def admin_update_review(review_id):
                  video_info['id'], description, rating, movie_link, review_id))
     conn.commit()
     conn.close()
-    
     flash('Cập nhật video review thành công!', 'success')
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/delete/<int:review_id>')
 def admin_delete_review(review_id):
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     conn = get_conn()
     c = conn.cursor()
     c.execute('DELETE FROM video_reviews WHERE id = ?', (review_id,))
     conn.commit()
     conn.close()
-    
     flash('Xóa video review thành công!', 'success')
     return redirect(url_for('admin_dashboard'))
 
 # Auto-update system routes
 @app.route('/admin/auto-update')
 def admin_auto_update():
-    if not is_localhost():
-        flash('Tính năng quản trị chỉ khả dụng khi truy cập từ localhost!', 'error')
-        return redirect(url_for('index'))
-    
     # Get logs from auto-update system
     logs = []
     try:
         auto_update = get_auto_update(app)
-        logs = auto_update.get_recent_logs(limit=10)
+        raw_logs = auto_update.get_recent_logs(limit=10)
+        # Chuyển đổi thời gian cho mỗi log
+        for log in raw_logs:
+            if isinstance(log, dict):  # Nếu log là dict
+                log['timestamp'] = convert_to_vietnam_time(log['timestamp'])
+                logs.append(log)
+            elif isinstance(log, tuple) and len(log) >= 1:  # Nếu log là tuple (timestamp, ...)
+                # Tạo tuple mới với timestamp đã được chuyển đổi
+                new_log = list(log)
+                new_log[0] = convert_to_vietnam_time(new_log[0])
+                logs.append(tuple(new_log))
+            else:
+                logs.append(log)
     except Exception as e:
         print(f"Error getting logs: {e}")
-    
     return render_template('admin/auto_update.html', logs=logs)
 
 @app.route('/admin/auto-update/stats')
 def admin_auto_update_stats():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         auto_update = get_auto_update(app)
-        
         # Get total videos count
         conn = get_conn()
         c = conn.cursor()
         c.execute('SELECT COUNT(*) FROM video_reviews')
         total_videos = c.fetchone()[0]
         conn.close()
-        
         # Get auto-update stats
         stats = auto_update.get_stats()
         stats['total_videos_added'] = total_videos
-        
+        # Chuyển đổi last_successful_update nếu có
+        if 'last_successful_update' in stats and stats['last_successful_update']:
+            stats['last_successful_update'] = convert_to_vietnam_time(stats['last_successful_update'])
         return jsonify(stats)
     except Exception as e:
         print(f"Error getting auto-update stats: {e}")
@@ -773,22 +623,16 @@ def admin_auto_update_stats():
 
 @app.route('/admin/auto-update/toggle', methods=['POST'])
 def admin_auto_update_toggle():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         data = request.get_json()
         enabled = data.get('enabled', False)
-        
         auto_update = get_auto_update(app)
-        
         if enabled:
             auto_update.enable()
             message = 'Hệ thống tự động cập nhật đã được kích hoạt'
         else:
             auto_update.disable()
             message = 'Hệ thống tự động cập nhật đã được tạm dừng'
-        
         return jsonify({
             'success': True,
             'message': message,
@@ -803,13 +647,9 @@ def admin_auto_update_toggle():
 
 @app.route('/admin/auto-update/run', methods=['POST'])
 def admin_auto_update_run():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         auto_update = get_auto_update(app)
         result = auto_update.run_update()
-        
         return jsonify({
             'success': True,
             'message': f'Cập nhật thành công! Tìm thấy {result.get("found", 0)} video, thêm mới {result.get("added", 0)} video',
@@ -824,9 +664,6 @@ def admin_auto_update_run():
 
 @app.route('/admin/auto-update/videos')
 def admin_auto_update_videos():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         conn = get_conn()
         c = conn.cursor()
@@ -834,7 +671,6 @@ def admin_auto_update_videos():
                     FROM video_reviews ORDER BY created_at DESC''')
         videos = c.fetchall()
         conn.close()
-        
         video_list = []
         for video in videos:
             video_list.append({
@@ -842,9 +678,8 @@ def admin_auto_update_videos():
                 'title': video[1],
                 'movie_title': video[2],
                 'channel': video[3],  # reviewer_name as channel
-                'created_at': video[4]
+                'created_at': convert_to_vietnam_time(video[4]) if video[4] else 'Không xác định'
             })
-        
         return jsonify({
             'success': True,
             'videos': video_list,
@@ -861,13 +696,9 @@ def admin_auto_update_videos():
 
 @app.route('/admin/auto-update/run-manual', methods=['POST'])
 def admin_auto_update_run_manual():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         auto_update = get_auto_update(app)
         result = auto_update.run_update()
-        
         return jsonify({
             'success': True,
             'message': f'Cập nhật thành công! Tìm thấy {result.get("found", 0)} video, thêm mới {result.get("added", 0)} video',
@@ -887,9 +718,6 @@ def admin_auto_update_get_videos():
 
 @app.route('/admin/auto-update/logs')
 def admin_auto_update_logs():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         conn = get_conn()
         c = conn.cursor()
@@ -897,10 +725,15 @@ def admin_auto_update_logs():
                     FROM update_logs ORDER BY timestamp DESC LIMIT 20''')
         logs = c.fetchall()
         conn.close()
-        
+        # Chuyển đổi thời gian cho mỗi log
+        converted_logs = []
+        for log in logs:
+            converted_log = list(log)
+            converted_log[0] = convert_to_vietnam_time(converted_log[0])  # timestamp
+            converted_logs.append(tuple(converted_log))
         return jsonify({
             'success': True,
-            'logs': logs
+            'logs': converted_logs
         })
     except Exception as e:
         print(f"Error getting logs: {e}")
@@ -912,68 +745,51 @@ def admin_auto_update_logs():
 
 @app.route('/admin/auto-update/bulk-operations', methods=['POST'])
 def admin_auto_update_bulk_operations():
-    if not is_localhost():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
         data = request.get_json()
         operation = data.get('operation')
-        
         conn = get_conn()
         c = conn.cursor()
-        
         if operation == 'delete_selected':
             video_ids = data.get('video_ids', [])
             if not video_ids:
                 return jsonify({'success': False, 'error': 'Không có video nào được chọn'})
-            
             # Delete selected videos
             placeholders = ','.join(['?' for _ in video_ids])
             c.execute(f'DELETE FROM video_reviews WHERE id IN ({placeholders})', video_ids)
-            
             deleted_count = c.rowcount
             conn.commit()
             conn.close()
-            
             return jsonify({
                 'success': True,
                 'message': f'Đã xóa {deleted_count} video thành công'
             })
-            
         elif operation == 'delete_all':
             # Delete all videos
             c.execute('DELETE FROM video_reviews')
             deleted_count = c.rowcount
-            
             # Reset auto-increment counter
             c.execute("DELETE FROM sqlite_sequence WHERE name='video_reviews'")
-            
             conn.commit()
             conn.close()
-            
             return jsonify({
                 'success': True,
                 'message': f'Đã xóa tất cả {deleted_count} video và reset ID thành công'
             })
-            
         elif operation == 'reset_ids':
             # Get all videos ordered by creation date
             c.execute('SELECT * FROM video_reviews ORDER BY created_at ASC')
             videos = c.fetchall()
-            
             if not videos:
                 conn.close()
                 return jsonify({
                     'success': True,
                     'message': 'Không có video nào để reset ID'
                 })
-            
             # Delete all videos
             c.execute('DELETE FROM video_reviews')
-            
             # Reset auto-increment counter
             c.execute("DELETE FROM sqlite_sequence WHERE name='video_reviews'")
-            
             # Re-insert videos with new sequential IDs (skip ID column)
             for video in videos:
                 c.execute('''INSERT INTO video_reviews 
@@ -982,22 +798,18 @@ def admin_auto_update_bulk_operations():
                              thumbnail_url, published_at, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                             video[1:])  # Skip the old ID (video[0])
-            
             conn.commit()
             conn.close()
-            
             return jsonify({
                 'success': True,
                 'message': f'Đã reset ID cho {len(videos)} video thành công'
             })
-            
         else:
             conn.close()
             return jsonify({
                 'success': False,
                 'error': f'Thao tác không hợp lệ: {operation}'
             })
-            
     except Exception as e:
         print(f"Error in bulk operations: {e}")
         return jsonify({
@@ -1013,7 +825,6 @@ def api_reviews():
     c.execute('SELECT * FROM video_reviews ORDER BY created_at DESC')
     reviews = c.fetchall()
     conn.close()
-    
     return jsonify([{
         'id': r[0],
         'title': r[1],
@@ -1025,7 +836,8 @@ def api_reviews():
         'description': r[7],
         'rating': r[8],
         'movie_link': r[9],
-        'created_at': r[10]
+        'created_at': r[10],
+        'created_at_vn': convert_to_vietnam_time(r[10]) if r[10] else 'Không xác định'
     } for r in reviews])
 
 @app.route('/admin/preview-youtube', methods=['POST'])
@@ -1034,13 +846,10 @@ def preview_youtube():
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
-        
         if not url:
             return jsonify({'success': False, 'error': 'URL không được để trống'})
-        
         parser = YouTubeURLParser()
         video_info = parser.get_video_info(url)
-        
         if video_info:
             return jsonify({
                 'success': True,
@@ -1051,7 +860,6 @@ def preview_youtube():
                 'success': False, 
                 'error': 'Không thể lấy thông tin video. Kiểm tra lại URL.'
             })
-            
     except Exception as e:
         return jsonify({'success': False, 'error': f'Lỗi server: {str(e)}'})
 
@@ -1063,28 +871,22 @@ def add_manual_video():
         url = data.get('url', '').strip()
         custom_title = data.get('custom_title', '').strip()
         custom_description = data.get('custom_description', '').strip()
-        
         if not url:
             return jsonify({'success': False, 'error': 'URL không được để trống'})
-        
         parser = YouTubeURLParser()
         video_info = parser.get_video_info(url)
-        
         if not video_info:
             return jsonify({
                 'success': False, 
                 'error': 'Không thể lấy thông tin video. Kiểm tra lại URL.'
             })
-        
         # Add to database
         result = parser.add_video_to_database(
             video_info, 
             custom_title=custom_title or None,
             custom_description=custom_description or None
         )
-        
         return jsonify(result)
-        
     except Exception as e:
         return jsonify({'success': False, 'error': f'Lỗi server: {str(e)}'})
 
@@ -1094,7 +896,6 @@ def check_api_status():
     try:
         from services.smart_youtube_service import SmartYouTubeService
         service = SmartYouTubeService()
-        
         # Check if we have real API key
         api_key = service.get_current_api_key()
         if not api_key or api_key == 'DEMO_KEY_SMART_MODE':
@@ -1103,7 +904,6 @@ def check_api_status():
                 'status': 'demo',
                 'message': 'Demo mode - cần YouTube API key'
             })
-        
         # Try a simple API call
         try:
             videos = service.search_youtube_api('test', max_results=1)
@@ -1125,7 +925,6 @@ def check_api_status():
                 'status': 'error',
                 'message': f'Lỗi API: {str(api_error)}'
             })
-            
     except Exception as e:
         return jsonify({'success': False, 'error': f'Lỗi kiểm tra: {str(e)}'})
 
@@ -1135,23 +934,18 @@ def get_related_videos(current_video_id):
     try:
         conn = get_conn()
         c = conn.cursor()
-        
         # Lấy thông tin video hiện tại
         c.execute('''SELECT movie_title, reviewer_name, series_name, movie_type, country, genre 
                      FROM video_reviews WHERE id = ?''', (current_video_id,))
         current_video = c.fetchone()
-        
         if not current_video:
             return jsonify({'success': False, 'error': 'Video không tồn tại'})
-        
         current_movie, current_reviewer, current_series, current_type, current_country, current_genre = current_video
-        
         related_videos = []
-        
         # Ưu tiên 1: Video cùng bộ phim (nếu là phim bộ)
         if current_type == 'series' and current_series:
             c.execute('''
-                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number
+                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number, created_at
                 FROM video_reviews 
                 WHERE id != ? AND series_name = ? AND movie_type = 'series'
                 ORDER BY episode_number ASC, rating DESC
@@ -1159,11 +953,10 @@ def get_related_videos(current_video_id):
             ''', (current_video_id, current_series))
             series_videos = c.fetchall()
             related_videos.extend(series_videos)
-        
         # Ưu tiên 2: Video cùng reviewer và cùng thể loại
         if len(related_videos) < 3:
             c.execute('''
-                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number
+                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number, created_at
                 FROM video_reviews 
                 WHERE id != ? AND reviewer_name = ? AND genre = ? 
                 AND (series_name != ? OR series_name IS NULL)
@@ -1172,11 +965,10 @@ def get_related_videos(current_video_id):
             ''', (current_video_id, current_reviewer, current_genre, current_series, 3 - len(related_videos)))
             reviewer_videos = c.fetchall()
             related_videos.extend(reviewer_videos)
-        
         # Ưu tiên 3: Video cùng quốc gia và thể loại
         if len(related_videos) < 3:
             c.execute('''
-                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number
+                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number, created_at
                 FROM video_reviews 
                 WHERE id != ? AND country = ? AND genre = ?
                 AND reviewer_name != ?
@@ -1186,11 +978,10 @@ def get_related_videos(current_video_id):
             ''', (current_video_id, current_country, current_genre, current_reviewer, current_series, 3 - len(related_videos)))
             country_videos = c.fetchall()
             related_videos.extend(country_videos)
-        
         # Ưu tiên 4: Video cùng thể loại (nếu vẫn chưa đủ)
         if len(related_videos) < 3:
             c.execute('''
-                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number
+                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number, created_at
                 FROM video_reviews 
                 WHERE id != ? AND genre = ?
                 AND reviewer_name != ? AND country != ?
@@ -1200,11 +991,10 @@ def get_related_videos(current_video_id):
             ''', (current_video_id, current_genre, current_reviewer, current_country, current_series, 3 - len(related_videos)))
             genre_videos = c.fetchall()
             related_videos.extend(genre_videos)
-        
         # Ưu tiên 5: Video ngẫu nhiên (nếu vẫn chưa đủ)
         if len(related_videos) < 3:
             c.execute('''
-                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number
+                SELECT id, title, movie_title, reviewer_name, video_id, video_type, rating, country, genre, series_name, episode_number, created_at
                 FROM video_reviews 
                 WHERE id != ? 
                 AND (series_name != ? OR series_name IS NULL)
@@ -1213,9 +1003,7 @@ def get_related_videos(current_video_id):
             ''', (current_video_id, current_series, 3 - len(related_videos)))
             random_videos = c.fetchall()
             related_videos.extend(random_videos)
-        
         conn.close()
-        
         # Loại bỏ trùng lặp và format dữ liệu trả về
         seen_ids = set()
         unique_videos = []
@@ -1225,7 +1013,6 @@ def get_related_videos(current_video_id):
                 unique_videos.append(video)
                 if len(unique_videos) >= 3:
                     break
-        
         videos = []
         for video in unique_videos:
             video_data = {
@@ -1240,10 +1027,10 @@ def get_related_videos(current_video_id):
                 'genre': video[8] if len(video) > 8 else 'Unknown',
                 'series_name': video[9] if len(video) > 9 else None,
                 'episode_number': video[10] if len(video) > 10 else None,
+                'created_at_vn': convert_to_vietnam_time(video[11]) if len(video) > 11 and video[11] else 'Không xác định',
                 'thumbnail_url': f'https://img.youtube.com/vi/{video[4]}/hqdefault.jpg' if video[5] == 'youtube' else None
             }
             videos.append(video_data)
-        
         return jsonify({
             'success': True,
             'videos': videos,
@@ -1254,10 +1041,8 @@ def get_related_videos(current_video_id):
                 'genre': current_genre
             }
         })
-        
     except Exception as e:
         return jsonify({'success': False, 'error': f'Lỗi server: {str(e)}'})
-
 
 # Background AI loader (non-blocking)
 import threading as __threading_for_ai
@@ -1280,14 +1065,13 @@ def background_load_ai(retry=False, retry_delay=300):
             __time_for_retry.sleep(retry_delay)
             background_load_ai(retry=False)
 
-
 @app.route('/healthz')
 def healthz():
     try:
         return jsonify({'status': 'ok', 'ai_loaded': bool(model is not None)})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
-    
+
 @app.route('/health')
 def health_check():
     """Endpoint nhẹ cho UptimeRobot hoặc ping tự động"""
@@ -1295,13 +1079,11 @@ def health_check():
 
 if __name__ == '__main__':
     import threading, os
-
     try:
         print("✅ Initializing database (once)...")
         init_db()
     except Exception as e:
         print("⚠️ init_db() failed:", e)
-
     # Khởi động AI background (non-blocking)
     def start_background_ai():
         try:
@@ -1313,12 +1095,10 @@ if __name__ == '__main__':
                 print("📝 Fallback: manual classification")
         except Exception as e:
             print("⚠️ AI init error:", e)
-
     if not os.getenv("DISABLE_AI", "false").lower() == "true":
         threading.Thread(target=start_background_ai, daemon=True).start()
     else:
         print("🧠 AI loading skipped (DISABLE_AI=True)")
-
     # Auto-update (safe)
     try:
         print("🚀 Initializing Auto-Update System...")
@@ -1327,7 +1107,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"⚠️ Auto-Update System failed: {e}")
         print("📝 Continuing without auto-update...")
-
     # === Flask server start ===
     port = int(os.environ.get("PORT", 10000))  # Render dùng PORT động
     print(f"🌐 Starting Flask on 0.0.0.0:{port}")

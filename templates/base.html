@@ -86,19 +86,7 @@
                     </button>
                 </form>
                 
-                <ul class="navbar-nav">
-                    {% if request.environ.get('REMOTE_ADDR') in ['127.0.0.1', 'localhost'] or request.environ.get('HTTP_HOST', '').startswith('127.0.0.1') or request.environ.get('HTTP_HOST', '').startswith('localhost') %}
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle text-warning" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="fas fa-user-shield me-1"></i>Quản trị
-                        </a>
-                        <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="{{ url_for('admin_auto_update') }}">
-                                <i class="fas fa-robot me-1"></i>Quản lý hệ thống
-                            </a></li>
-                        </ul>
-                    </li>
-                    {% endif %}
+                <ul class="navbar-nav">                   
                 </ul>
             </div>
         </div>
