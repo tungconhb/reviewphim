@@ -28,23 +28,54 @@ def get_conn(path='db.sqlite'):
     return conn
 
 # ================== HÀM HỖ TRỢ MÚI GIỜ VIỆT NAM ==================
+from datetime import datetime, timezone
+import pytz
+
 def convert_to_vietnam_time(utc_datetime_str):
-    """Chuyển đổi chuỗi datetime UTC thành datetime Việt Nam (UTC+7)"""
+    """Chuyển đổi thời gian UTC sang giờ Việt Nam (UTC+7), xử lý cả dict/phức hợp."""
     try:
         if not utc_datetime_str:
             return 'Không xác định'
-        # Chuyển string thành datetime object (giả sử format là 'YYYY-MM-DD HH:MM:SS')
-        utc_dt = datetime.strptime(utc_datetime_str, '%Y-%m-%d %H:%M:%S')
-        # Thiết lập múi giờ UTC
+
+        # Nếu là dict — lấy timestamp hoặc date bên trong
+        if isinstance(utc_datetime_str, dict):
+            # Trường hợp log dạng {'timestamp': '...', ...}
+            utc_datetime_str = (
+                utc_datetime_str.get('timestamp') or
+                utc_datetime_str.get('date') or
+                utc_datetime_str.get('datetime') or
+                str(utc_datetime_str)
+            )
+
+        # Nếu là datetime object
+        if isinstance(utc_datetime_str, datetime):
+            utc_dt = utc_datetime_str
+        else:
+            # Nếu là chuỗi — chuẩn hóa
+            utc_datetime_str = str(utc_datetime_str).strip().replace("T", " ").split(".")[0]
+
+            # Cố gắng trích timestamp từ chuỗi JSON-like
+            if utc_datetime_str.startswith("{") and "timestamp" in utc_datetime_str:
+                import re, ast
+                try:
+                    parsed = ast.literal_eval(utc_datetime_str)
+                    if isinstance(parsed, dict) and "timestamp" in parsed:
+                        utc_datetime_str = parsed["timestamp"]
+                except Exception:
+                    pass
+
+            utc_dt = datetime.strptime(utc_datetime_str, '%Y-%m-%d %H:%M:%S')
+
+        # Đặt múi giờ
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
-        # Chuyển sang múi giờ Việt Nam
         vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
         vn_dt = utc_dt.astimezone(vn_tz)
-        # Trả về string theo định dạng mong muốn
+
         return vn_dt.strftime('%H:%M:%S %d/%m/%Y')
+
     except Exception as e:
-        print(f"Error converting time: {e}")
-        return utc_datetime_str  # Trả về nguyên bản nếu có lỗi
+        print(f"Error converting time: {e} | raw={utc_datetime_str}")
+        return 'Không xác định'
 
 # ================== HÀM XÁC THỰC ADMIN ==================
 def is_valid_admin_key(key):
@@ -610,8 +641,13 @@ def admin_auto_update_stats():
         stats['total_videos_added'] = total_videos
         # Chuyển đổi last_successful_update nếu có
         if 'last_successful_update' in stats and stats['last_successful_update']:
-            stats['last_successful_update'] = convert_to_vietnam_time(stats['last_successful_update'])
+            value = stats['last_successful_update']
+            # Kiểm tra nếu value là dict thì lấy trường bên trong (thường là 'date' hoặc 'datetime')
+            if isinstance(value, dict):
+                value = value.get('date') or value.get('datetime') or str(value)
+            stats['last_successful_update'] = convert_to_vietnam_time(value)
         return jsonify(stats)
+
     except Exception as e:
         print(f"Error getting auto-update stats: {e}")
         return jsonify({

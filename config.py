@@ -1,7 +1,7 @@
 # Auto-Update Configuration
 
 # YouTube API Configuration
-YOUTUBE_API_KEY = 'AIzaSyDpQlqhKR-EOc8WHyazhri56c7xL5AydCo'  # ✅ API KEY THẬT ĐÃ CẬP NHẬT
+YOUTUBE_API_KEY = 'AIzaSyAybfm4zFkER-6hR-Vwul4HzWkrfkQdfxA'  # ✅ API KEY THẬT ĐÃ CẬP NHẬT
 # API key được cung cấp để update video thật
 
 # Search Configuration - Added Vus Review to existing channels
